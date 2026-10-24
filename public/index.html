@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#175c4a">
+  <title>UNO · 局域网牌桌</title>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/game.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <div class="shell">
+    <header class="site-header">
+      <a href="#" class="brand" aria-label="UNO 局域网牌桌首页"><span class="brand-mark">U<span>·</span></span><span>UNO <small>局域网牌桌</small></span></a>
+      <div class="connection"><span id="connectionDot" class="status-dot"></span><span id="connectionText">准备入座</span><button id="reconnect" class="text-button" hidden>重新连接</button></div>
+    </header>
+
+    <main>
+      <section id="home" class="home-grid">
+        <div class="intro">
+          <p class="eyebrow">SAME WI-FI. SAME TABLE.</p>
+          <h1>人到齐，<br>就开一局<span class="accent">。</span></h1>
+          <p class="intro-copy">不用下载，不用注册。<br>连上同一个网络，把朋友叫到牌桌边。</p>
+          <div class="hero-cards" aria-hidden="true">
+            <div class="hero-card red"><span>7</span><b>7</b></div>
+            <div class="hero-card yellow"><span>↻</span><b>↻</b></div>
+            <div class="hero-card green"><span>U</span><b>UNO</b></div>
+          </div>
+          <div class="intro-meta"><span>2–10 位玩家</span><span>经典 108 张</span><span>本地实时联机</span></div>
+        </div>
+        <div class="entry-panel panel">
+          <div class="panel-heading"><span class="step-label">01 / 入座</span><h2>先告诉大家，你是谁？</h2></div>
+          <label for="nickname">你的昵称</label>
+          <input id="nickname" maxlength="32" autocomplete="nickname" placeholder="例如：今天一定赢">
+          <p id="identityHint" class="field-hint">1–16 个字符，同一浏览器会记住你的身份。</p>
+          <div class="entry-section">
+            <div class="section-title"><h3>开一张新牌桌</h3><span class="mini-label">我是房主</span></div>
+            <label for="capacity">人数上限</label>
+            <div class="inline-field"><select id="capacity" aria-label="房间人数上限"><option value="2">2 人</option><option value="3">3 人</option><option value="4" selected>4 人</option><option value="5">5 人</option><option value="6">6 人</option><option value="7">7 人</option><option value="8">8 人</option><option value="9">9 人</option><option value="10">10 人</option></select><button id="createRoom" class="button primary">创建房间 <span>↗</span></button></div>
+            <label class="participation-option"><input id="createHostParticipates" type="checkbox" checked><span>房主参与游戏<small>关闭后仅管理房间、不占玩家名额，你可以再用手机加入。</small></span></label>
+          </div>
+          <div class="divider"><span>或者，朋友已经在等你</span></div>
+          <label for="joinCode">4 位房间号</label>
+          <div class="inline-field"><input id="joinCode" class="code-input" inputmode="numeric" maxlength="4" autocomplete="off" placeholder="0000"><button id="joinRoom" class="button secondary">加入房间</button></div>
+          <p class="privacy-note">● 网页和游戏状态由这台局域网主机提供</p>
+        </div>
+      </section>
+
+      <section id="room" hidden>
+        <div class="room-header"><div><p class="eyebrow">YOUR TABLE</p><h1>房间 <span id="roomCode"></span><span id="roomStatus" class="pill">等待入座</span></h1></div><div class="room-controls"><button id="leaveRoom" class="button light">退出房间</button><button id="closeRoom" class="text-button danger" hidden>解散</button></div></div>
+        <div id="pauseBanner" class="pause-banner" hidden></div>
+
+        <section id="lobby" class="lobby-grid">
+          <div class="panel lobby-panel">
+            <div class="section-title"><h2>牌桌上的朋友</h2><span id="playerCount" class="mini-label"></span></div>
+            <div id="lobbyPlayers" class="lobby-players"></div>
+            <div id="hostSettings" class="host-settings" hidden><label for="roomCapacity">人数上限</label><select id="roomCapacity"></select><label for="turnSeconds">每回合秒数</label><input id="turnSeconds" type="number" min="15" max="120" step="1" value="45"><button id="saveCapacity" class="text-button">保存设置</button></div>
+            <p id="timerSettingHint" class="field-hint"></p>
+            <label id="participationSetting" class="participation-option" hidden><input id="roomHostParticipates" type="checkbox"><span>房主参与游戏<small>只可在开局前修改。关闭后不发牌，保留房间管理权限。</small></span></label>
+            <p id="roomInfo" class="field-hint"></p>
+            <button id="startGame" class="button primary full">开始游戏 <span>→</span></button>
+            <p id="startHint" class="field-hint centered"></p>
+          </div>
+          <aside class="panel invitation"><span class="step-label">02 / 邀请朋友</span><h2>把房间号告诉他们。</h2><p>朋友先打开与你相同的主机网址，<br>再输入上方的 4 位房间号。</p><label for="shareAddress">当前网页地址</label><input id="shareAddress" readonly><p id="localhostHint" class="field-hint"></p><div class="small-rule">准备好就开始。游戏中暂不接受新玩家加入，刷新页面可以恢复原来的座位。</div></aside>
+        </section>
+
+        <section id="game" hidden>
+          <div class="game-caption"><span id="tableMode">围坐一桌 · 好戏开场</span><span class="house-rules">本房规则 · 摸牌结束回合</span></div>
+          <div class="game-grid">
+            <div class="board-region">
+              <div id="roundTable" class="round-table" data-color="green">
+                <div class="felt-table">
+                  <div id="directionTop" class="rotation-arrow top" aria-label="顺时针"><span>→</span><small>顺时针</small></div>
+                  <div class="table-center">
+                    <div id="activeColor" class="active-color-callout">跟绿色</div>
+                    <div id="turnText" class="turn-label"></div>
+                    <div id="turnClock" class="turn-clock"><span id="clockLabel"></span><strong id="clockSeconds"></strong><div class="clock-track"><i id="clockProgress"></i></div></div>
+                    <div class="table-piles">
+                      <div class="pile"><button id="drawPile" class="card-back deck-button" aria-label="点击牌堆摸一张，立即结束回合"><span class="deck-mark">UNO</span><strong class="deck-label">摸一张 ↓</strong></button><span id="deckCount" class="pile-caption"></span></div>
+                      <div class="pile"><div id="topCard"></div><span class="pile-caption">上一张牌</span></div>
+                    </div>
+                    <p id="phaseText" class="table-description"></p>
+                    <div id="wildResponse" class="table-actions" hidden><button id="acceptWild4" class="button white">接受 +4</button><button id="challengeWild4" class="button amber">质疑 +4</button></div>
+                    <button id="initialColor" class="button white" hidden>选择起始颜色</button>
+                  </div>
+                  <div id="directionBottom" class="rotation-arrow bottom" aria-label="顺时针"><span>←</span><small>顺时针</small></div>
+                  <div id="gameResult" class="game-result" hidden><h2 id="winnerText"></h2><p id="winnerHint"></p><ol id="rankingList" class="ranking-list"></ol><button id="returnLobby" class="button white">返回大厅，再来一局</button></div>
+                </div>
+                <div id="seatRing" class="seat-ring" role="list" aria-label="圆桌座次"></div>
+              </div>
+            </div>
+            <aside class="panel activity"><p class="eyebrow">AT THE TABLE</p><h3>牌桌动态</h3><ol id="activityLog"></ol><div class="rule-reminder">彩色功能牌必须<strong>跟当前颜色</strong>。摸一张就结束回合，不用再点跳过。</div></aside>
+          </div>
+          <section id="handPanel" class="hand-panel panel">
+            <div class="hand-toolbar"><div><h2>你的手牌 <span id="handCount" class="count-badge"></span></h2><p id="handHint" class="field-hint"></p></div><div class="hand-actions"><button id="callUno" class="button uno-button">UNO!</button><button id="drawCard" class="button draw-button"><strong>＋ 摸一张</strong><small>摸完结束回合</small></button></div></div>
+            <div id="hand" class="hand" aria-label="你的手牌，左右滑动查看"></div>
+          </section>
+          <section id="spectatorPanel" class="hand-panel panel" hidden><h2>你正在旁观牌桌</h2><p class="field-hint">你不参与本局，不会收到手牌。房主仍可管理房间，并在结算后返回大厅。电脑上的 Node 服务需要保持运行。</p></section>
+          <details class="mobile-history"><summary>查看牌桌动态</summary><ol id="mobileActivityLog"></ol></details>
+        </section>
+      </section>
+    </main>
+
+    <footer><span>一张牌，一起玩。</span><button id="showRules" class="text-button">玩法说明 ↗</button><span class="version">LAN UNO / v0.1</span></footer>
+  </div>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  <div id="motionLayer" class="motion-layer" aria-hidden="true"></div>
+  <div id="announcement" class="announcement" role="status" aria-live="assertive" hidden><strong id="announcementTitle"></strong><span id="announcementDetail"></span></div>
+
+  <dialog id="colorDialog"><div class="dialog-body"><p class="eyebrow">CHOOSE A COLOR</p><h2>接下来，什么颜色？</h2><p>选好颜色后提交这张变色牌。</p><div id="colorOptions" class="color-options"><button data-color="red" class="color-choice red">红色</button><button data-color="yellow" class="color-choice yellow">黄色</button><button data-color="green" class="color-choice green">绿色</button><button data-color="blue" class="color-choice blue">蓝色</button></div><button id="cancelColor" class="text-button">取消</button></div></dialog>
+  <dialog id="confirmDialog"><div class="dialog-body"><h2 id="confirmTitle"></h2><p id="confirmText"></p><div class="dialog-actions"><button id="cancelConfirm" class="button light">取消</button><button id="acceptConfirm" class="button primary">确认</button></div></div></dialog>
+  <dialog id="evidenceDialog"><div class="dialog-body"><p class="eyebrow">WILD +4 CHALLENGE</p><h2 id="evidenceTitle"></h2><p id="evidenceText"></p><div id="evidenceCards" class="evidence-cards"></div><p class="field-hint">这是出牌前的手牌快照，仅向你展示。</p><button id="closeEvidence" class="button primary">知道了</button></div></dialog>
+  <dialog id="rulesDialog"><div class="dialog-body rules"><p class="eyebrow">HOUSE RULES</p><h2>这一桌，这样玩。</h2><ol><li>每人 7 张。数字牌按相同颜色或相同数字接牌；彩色功能牌只按当前颜色接牌，不按相同功能跨色接牌。</li><li>只有黑色变色牌和 +4 可以跨颜色使用。变色后，所有人跟所选的颜色。</li><li>轮到你时，可以出一张牌，或摸一张。摸牌后立刻结束回合，即使新牌能出，也必须等下次；没有跳过或弃牌按钮。</li><li>跳过让下家停一轮；反转改变方向。双人时，两种牌都让自己再行动。</li><li>+2 让下家抽 2 张并跳过。不能叠加 +2 或 +4。</li><li>+4 只有在没有当前颜色的手牌时合法，但你可以冒险使用。质疑成功，出牌者抽 4；失败，质疑者抽 6 并跳过。</li><li>剩两张时可先点 UNO 再出牌；只剩一张时也可直接喊 UNO。有明显动画提示，没有抓漏及漏喊罚牌。</li><li>按出完手牌顺序记录名次，已完赛的人不再轮转；只剩一人时全局结束。最后一张为罚牌时先结算。不累计积分。</li><li>默认每回合 45 秒，房主可在大厅调整。超时自动摸一张并结束回合；回应 +4 超时视为接受罚牌。</li></ol><p class="small-rule">圆桌以自己的位置为底部，上下箭头显示轮转方向，发光座位表示当前行动者。未完赛玩家掉线暂停计时，保留 60 秒，超时或退出中止本局；只管理的房主不占座位。</p><button id="closeRules" class="button primary">明白了</button></div></dialog>
+</body>
+</html>
