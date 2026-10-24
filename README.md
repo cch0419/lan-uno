@@ -4,6 +4,8 @@
 
 完整设计与后续计划见 [DESIGN.md](DESIGN.md)。
 
+公网 Docker 部署请按 [阿里云 Ubuntu 逐步部署手册](docs/PUBLIC_DEPLOYMENT_GUIDE.md) 操作；项目已包含 Dockerfile 和 Compose 配置。
+
 更新代码后请先停止原服务，再运行 `npm start`，所有设备刷新页面并重新建房。网页资源在服务启动时加载，单独刷新网页不会加载尚未重启的服务端版本。
 
 手机圆桌预览：
