@@ -36,3 +36,17 @@ test('large hands preserve readable exposed edges and overflow instead of shrink
   assert.equal(layoutHand(30, 390, 73, 105).overflowing, true);
   assert.equal(layoutHand(7, 1000).overflowing, false);
 });
+
+test('short-screen fans reduce vertical space while preserving card exposure and clipping clearance', () => {
+  for (const count of [1, 7, 30]) {
+    const regular = layoutHand(count, 320, 73, 105);
+    const compact = layoutHand(count, 320, 73, 105, { top: 16, bottom: 12, maxRise: 16 });
+    assert.ok(compact.height < regular.height);
+    assert.equal(compact.width, regular.width);
+    assert.deepEqual(compact.cards.map(card => card.x), regular.cards.map(card => card.x));
+    for (const card of compact.cards) {
+      assert.ok(card.y >= 16);
+      assert.ok(card.y + 105 + 12 <= compact.height);
+    }
+  }
+});

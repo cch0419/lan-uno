@@ -4,6 +4,8 @@ export function createVoice({ send, notify, host = window, page = document }) {
   const listenButton = page.getElementById('voiceListen');
   const status = page.getElementById('voiceStatus');
   const people = page.getElementById('voicePeople');
+  const bar = page.querySelector('.voice-bar');
+  const detailsButton = page.getElementById('voiceDetailsToggle');
   const peers = new Map();
   let roomCode = null;
   let self = null;
@@ -26,13 +28,18 @@ export function createVoice({ send, notify, host = window, page = document }) {
     listenButton.disabled = !roomCode || busy || !supported;
     micButton.setAttribute('aria-pressed', String(mic));
     listenButton.setAttribute('aria-pressed', String(listening));
-    micButton.textContent = mic ? '🎙 麦克风：开' : '🎙 开启麦克风';
-    listenButton.textContent = listening ? '🔊 听筒：开' : '🔇 开启听筒';
+    micButton.querySelector('.voice-button-label').textContent = mic ? '麦克风：开' : '开启麦克风';
+    listenButton.querySelector('.voice-button-label').textContent = listening ? '听筒：开' : '开启听筒';
+    micButton.setAttribute('aria-label', mic ? '关闭麦克风' : canRecord ? '开启麦克风' : '麦克风不可用，需要可信任的 HTTPS');
+    listenButton.setAttribute('aria-label', listening ? '关闭听筒' : '开启听筒');
+    detailsButton.dataset.notice = String(!!errorText || !canRecord || !supported);
     micButton.title = canRecord ? '点击切换麦克风' : '手机麦克风需要可信任的 HTTPS 地址，请查看启动说明';
     status.textContent = errorText || (!supported ? '当前浏览器不支持语音聊天' :
       !canRecord ? '麦克风需要可信任的 HTTPS 地址；可先尝试仅开启听筒' :
       busy ? '正在连接语音…' : mic || listening ?
       `${mic ? '麦克风已开启' : '仅收听'} · ${Math.max(0, members.length - 1)} 位语音伙伴` : '语音未开启，点击麦克风或听筒加入');
+    detailsButton.title = status.textContent;
+    detailsButton.setAttribute('aria-label', errorText ? `语音详情：${errorText}` : '语音详情');
     people.replaceChildren(...members.filter(member => member.id !== self?.id).map(member => {
       const item = page.createElement('span');
       const peer = peers.get(member.id);
@@ -62,6 +69,7 @@ export function createVoice({ send, notify, host = window, page = document }) {
     self = null; members = []; listening = false; busy = false; errorText = '';
     stopMicrophone();
     page.getElementById('voiceResume').hidden = true;
+    bar.dataset.expanded = 'false'; detailsButton.setAttribute('aria-expanded', 'false');
     for (const id of peers.keys()) removePeer(id);
     render();
   }
@@ -260,6 +268,18 @@ export function createVoice({ send, notify, host = window, page = document }) {
     errorText = ''; page.getElementById('voiceResume').hidden = true;
     for (const peer of peers.values()) void playRemote(peer);
     render();
+  });
+  detailsButton.addEventListener('click', () => {
+    const expanded = bar.dataset.expanded !== 'true';
+    bar.dataset.expanded = String(expanded); detailsButton.setAttribute('aria-expanded', String(expanded));
+  });
+  page.addEventListener('pointerdown', event => {
+    if (!bar.contains(event.target)) { bar.dataset.expanded = 'false'; detailsButton.setAttribute('aria-expanded', 'false'); }
+  });
+  bar.addEventListener('keydown', event => {
+    if (event.key === 'Escape') {
+      bar.dataset.expanded = 'false'; detailsButton.setAttribute('aria-expanded', 'false'); detailsButton.focus();
+    }
   });
   host.addEventListener('pagehide', () => {
     const previousRoom = roomCode; reset();

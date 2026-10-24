@@ -6,6 +6,7 @@ import { createVoice } from './voice.js';
 import { createChat } from './chat.js';
 
 const $ = id => document.getElementById(id);
+const compactGame = window.matchMedia('(max-width: 720px), (max-width: 1000px) and (max-height: 500px) and (orientation: landscape)');
 const colorNames = { red: '红色', yellow: '黄色', green: '绿色', blue: '蓝色' };
 const symbols = { skip: '⊘', reverse: '↻', draw2: '+2', wild: '变色', wild4: '+4' };
 const kindNames = { skip: '跳过', reverse: '反转', draw2: '+2', wild: '变色', wild4: '变色 +4' };
@@ -280,6 +281,7 @@ function showConfirm(title, text, callback) {
 
 function render() {
   document.body.classList.toggle('in-game', !!state?.game);
+  $('chatGameStatus').hidden = !state?.game;
   $('home').hidden = !!state;
   $('room').hidden = !state;
   $('nickname').disabled = ready || busy;
@@ -350,6 +352,7 @@ function renderGame(host, enabled) {
   $('tableMode').textContent = you.isParticipating ? '你坐在下方 · 按座次依次行动' : '房主管理视角 · 旁观本局';
   renderSeats(game, you.playerId);
   $('roundTable').dataset.color = game.activeColor ?? 'green';
+  $('roundTable').dataset.phase = game.phase;
   const clockwise = game.direction === 1;
   const directionLabel = clockwise ? '顺时针' : '逆时针';
   for (const [id, arrow] of [['directionTop', clockwise ? '→' : '←'], ['directionBottom', clockwise ? '←' : '→']]) {
@@ -362,7 +365,7 @@ function renderGame(host, enabled) {
     node.firstElementChild.textContent = arrow;
     node.lastElementChild.textContent = directionLabel;
   }
-  $('activeColor').textContent = game.activeColor ? `跟${colorNames[game.activeColor]}` : '先选一个颜色';
+  $('activeColor').textContent = game.activeColor ? `跟${colorNames[game.activeColor]}` : '选择颜色';
   $('turnText').textContent = game.phase === 'finished' ? '本局结束' : game.paused ? '等待朋友重新连接' : myTurn ? '你的回合 · 出牌或摸一张' : `${nameOf(game.currentPlayerId)} 正在行动`;
   if ($('topCard').firstElementChild?.dataset.cardId !== game.topCard.id) {
     const card = cardElement(game.topCard);
@@ -381,6 +384,7 @@ function renderGame(host, enabled) {
   $('challengeWild4').disabled = !actionEnabled;
   $('initialColor').hidden = !actions.canChooseInitialColor;
   $('initialColor').disabled = !actionEnabled;
+  arrangeTableActions();
   $('drawPile').disabled = !actionEnabled || !actions.canDraw;
   $('drawCard').disabled = !actionEnabled || !actions.canDraw;
   $('handCount').textContent = you.hand.length;
@@ -411,7 +415,7 @@ function renderSeats(game, viewerId) {
   const positions = layoutSeats(game.seatOrder, viewerId);
   $('roundTable').dataset.count = positions.length;
   const existing = new Map([...ring.children].map(node => [node.dataset.playerId, node]));
-  for (const node of ring.children) if (!game.seatOrder.includes(node.dataset.playerId)) node.remove();
+  for (const node of [...ring.children]) if (!game.seatOrder.includes(node.dataset.playerId)) node.remove();
   for (const position of positions) {
     const player = state.players.find(p => p.id === position.id);
     if (!player) continue;
@@ -463,6 +467,17 @@ function renderHand(cards, playableIds, enabled) {
   arrangeHand();
 }
 
+function arrangeTableActions() {
+  const mobile = compactGame.matches;
+  const destination = $(mobile ? 'mobileTableActions' : 'tableActionsHome');
+  for (const id of ['wildResponse', 'initialColor']) {
+    const node = $(id);
+    if (node.parentNode !== destination) destination.append(node);
+  }
+  $('mobileTableActions').hidden = !mobile || !state?.game ||
+    !(state.actions.canRespondWild4 || state.actions.canChooseInitialColor);
+}
+
 function arrangeHand() {
   const viewport = $('hand');
   const fan = $('handFan');
@@ -470,7 +485,11 @@ function arrangeHand() {
   const styles = getComputedStyle(viewport);
   const layout = layoutHand(fan.children.length, viewport.clientWidth,
     parseFloat(styles.getPropertyValue('--hand-card-width')),
-    parseFloat(styles.getPropertyValue('--hand-card-height')));
+    parseFloat(styles.getPropertyValue('--hand-card-height')), {
+      top: parseFloat(styles.getPropertyValue('--hand-fan-top')) || 28,
+      bottom: parseFloat(styles.getPropertyValue('--hand-fan-bottom')) || 24,
+      maxRise: parseFloat(styles.getPropertyValue('--hand-fan-rise')) || 24
+    });
   fan.style.width = `${layout.width}px`;
   fan.style.height = `${layout.height}px`;
   viewport.dataset.overflow = String(layout.overflowing ?? false);
@@ -495,7 +514,12 @@ function clockReady() {
 function updateClock() {
   const clock = state?.game?.clock;
   $('turnClock').hidden = !clock;
-  if (!clock) return;
+  if (!clock) {
+    if (state?.game) {
+      $('chatGameTurn').textContent = '本局结束'; $('chatGameColor').textContent = ''; $('chatGameClock').textContent = '';
+    }
+    return;
+  }
   const now = Date.now() + serverOffset;
   const settling = !clock.paused && now < clock.startsAt;
   const remaining = clock.paused ? clock.remainingMs : Math.max(0, clock.deadlineAt - Math.max(now, clock.startsAt));
@@ -503,6 +527,10 @@ function updateClock() {
   $('clockLabel').textContent = clock.paused ? '已暂停' : settling || animating ? '牌落桌后开始计时' : remaining === 0 ? '超时处理中' : state.game.phase === 'wild4_response' ? '回应倒计时' : '出牌倒计时';
   $('turnClock').classList.toggle('urgent', !clock.paused && !settling && remaining <= 10000);
   $('clockProgress').style.width = `${Math.min(100, remaining / (state.turnSeconds * 1000) * 100)}%`;
+  $('chatGameTurn').textContent = clock.paused ? '对局暂停' : state.game.currentPlayerId === state.you.playerId ? '轮到你了' : `${nameOf(state.game.currentPlayerId)}的回合`;
+  $('chatGameColor').textContent = state.game.activeColor ? `跟${colorNames[state.game.activeColor]}` : '待选色';
+  $('chatGameClock').textContent = clock.paused ? '暂停' : settling || animating ? '落牌中' : `${Math.ceil(remaining / 1000)}s`;
+  $('chatGameStatus').classList.toggle('urgent', !clock.paused && !settling && remaining <= 10000);
 }
 
 setInterval(() => {
@@ -567,6 +595,7 @@ $('showRules').onclick = () => $('rulesDialog').showModal();
 $('closeRules').onclick = () => $('rulesDialog').close();
 $('reconnect').onclick = () => { attempt = 0; connect().catch(error => toast(error.message, true)); };
 if (typeof ResizeObserver !== 'undefined') new ResizeObserver(arrangeHand).observe($('hand'));
-else window.addEventListener('resize', arrangeHand);
+window.addEventListener('resize', () => { arrangeHand(); arrangeTableActions(); });
+compactGame.addEventListener('change', arrangeTableActions);
 render();
 if (readStorage('uno.token') && $('nickname').value) connect().catch(() => {});

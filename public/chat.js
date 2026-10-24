@@ -37,6 +37,7 @@ export function createChat({ send, notify }) {
 
   function setOpen(value) {
     open = value && !!room;
+    document.body.classList.toggle('chat-open', open);
     panel.hidden = !open;
     if (open) { unread = 0; requestAnimationFrame(bottom); }
     else if (panel.contains(document.activeElement)) $('chatLauncher').focus({ preventScroll: true });

@@ -11,6 +11,13 @@
 .chat-header h2 { margin: 0; font-size: 17px; }
 .chat-header h2 span { margin-left: 10px; color: #788773; font-size: 10px; font-weight: 400; }
 .chat-header p { margin: 4px 0 0; font-size: 10px; color: var(--muted); }
+.chat-header > div { flex: 1; min-width: 0; }
+.chat-game-status { display: flex; align-items: center; gap: 8px; max-width: 270px; margin-top: 5px; padding: 3px 7px; border-radius: 6px; background: #e2ead7; color: #3c6045; font-size: 10px; line-height: 1.5; }
+.chat-game-status[hidden] { display: none; }
+.chat-game-status > span:first-child { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-game-status > span:nth-child(2), .chat-game-status strong { white-space: nowrap; flex-shrink: 0; }
+.chat-game-status strong { font-variant-numeric: tabular-nums; }
+.chat-game-status.urgent { color: #a13e36; background: #fae5d0; }
 .chat-close { width: 36px; height: 36px; border: 0; background: #fff9; border-radius: 50%; font-size: 25px !important; line-height: 1; color: #52674e; }
 .chat-history { position: relative; flex: 1; min-height: 70px; overflow: hidden; }
 .chat-empty { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; color: #8a9481; font-size: 13px; line-height: 2; margin: 0; pointer-events: none; }

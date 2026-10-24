@@ -49,13 +49,20 @@
       </section>
 
       <section id="room" hidden>
-        <div class="room-header"><div><p class="eyebrow">YOUR TABLE</p><h1>房间 <span id="roomCode"></span><span id="roomStatus" class="pill">等待入座</span></h1></div><div class="room-controls"><button id="leaveRoom" class="button light">退出房间</button><button id="closeRoom" class="text-button danger" hidden>解散</button></div></div>
-        <div id="pauseBanner" class="pause-banner" hidden></div>
+        <div class="room-topbar">
+        <div class="room-header"><div><p class="eyebrow">YOUR TABLE</p><h1><span class="room-title-prefix">房间 </span><span id="roomCode"></span><span id="roomStatus" class="pill">等待入座</span></h1></div><div class="room-controls"><button id="leaveRoom" class="button light">退出<span class="room-exit-suffix">房间</span></button><button id="closeRoom" class="text-button danger" hidden>解散</button></div></div>
         <section class="voice-bar" aria-label="房间语音聊天">
-          <div class="voice-controls"><button id="voiceMic" class="voice-button" aria-pressed="false" disabled>🎙 开启麦克风</button><button id="voiceListen" class="voice-button" aria-pressed="false" disabled>🔇 开启听筒</button><button id="voiceResume" class="text-button" hidden>恢复收听</button></div>
-          <p id="voiceStatus" class="voice-status" role="status">语音未开启</p>
+          <div class="voice-controls">
+            <button id="voiceMic" class="voice-button" aria-label="开启麦克风" aria-pressed="false" disabled><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3m-4 0h8"/><path class="voice-off-mark" d="m3 3 18 18"/></svg><span class="voice-button-label">开启麦克风</span></button>
+            <button id="voiceListen" class="voice-button" aria-label="开启听筒" aria-pressed="false" disabled><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9h4l5-4v14l-5-4H4ZM17 8a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14"/><path class="voice-off-mark" d="m3 3 18 18"/></svg><span class="voice-button-label">开启听筒</span></button>
+            <button id="voiceDetailsToggle" class="voice-details-toggle" type="button" aria-label="语音详情" aria-controls="voiceDetails" aria-expanded="false"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v6m0-10v.2"/></svg></button>
+          </div>
+          <div id="voiceDetails" class="voice-details"><p id="voiceStatus" class="voice-status" role="status">语音未开启</p><button id="voiceResume" class="text-button" hidden>恢复收听</button>
           <div id="voicePeople" class="voice-people" aria-label="语音伙伴"></div>
+          </div>
         </section>
+        </div>
+        <div id="pauseBanner" class="pause-banner" hidden></div>
 
         <section id="lobby" class="lobby-grid">
           <div class="panel lobby-panel">
@@ -87,8 +94,9 @@
                       <div class="pile"><div id="topCard"></div><span class="pile-caption">上一张牌</span></div>
                     </div>
                     <p id="phaseText" class="table-description"></p>
-                    <div id="wildResponse" class="table-actions" hidden><button id="acceptWild4" class="button white">接受 +4</button><button id="challengeWild4" class="button amber">质疑 +4</button></div>
+                    <div id="tableActionsHome" class="table-actions-home"><div id="wildResponse" class="table-actions" hidden><button id="acceptWild4" class="button white">接受 +4</button><button id="challengeWild4" class="button amber">质疑 +4</button></div>
                     <button id="initialColor" class="button white" hidden>选择起始颜色</button>
+                    </div>
                   </div>
                   <div id="directionBottom" class="rotation-arrow bottom" aria-label="顺时针"><span>←</span><small>顺时针</small></div>
                   <div id="gameResult" class="game-result" hidden><h2 id="winnerText"></h2><p id="winnerHint"></p><ol id="rankingList" class="ranking-list"></ol><button id="returnLobby" class="button white">返回大厅，再来一局</button></div>
@@ -98,12 +106,15 @@
             </div>
             <aside class="panel activity"><p class="eyebrow">AT THE TABLE</p><h3>牌桌动态</h3><ol id="activityLog"></ol><div class="rule-reminder">彩色功能牌必须<strong>跟当前颜色</strong>。摸一张就结束回合，不用再点跳过。</div></aside>
           </div>
+          <div class="player-region">
+          <div id="mobileTableActions" class="mobile-table-actions" role="group" aria-label="当前回合的选择" hidden></div>
           <section id="handPanel" class="hand-panel panel">
             <div class="hand-toolbar"><div><h2>你的手牌 <span id="handCount" class="count-badge"></span></h2><p id="handHint" class="field-hint"></p></div><div class="hand-actions"><button id="drawCard" class="button draw-button"><strong>＋ 摸一张</strong><small>摸完结束回合</small></button></div></div>
             <div id="hand" class="hand" role="group" aria-label="扇形手牌"><div id="handFan" class="hand-fan"></div></div>
             <p id="handScrollHint" class="hand-scroll-hint" hidden>← 左右滑动，查看全部手牌 →</p>
           </section>
           <section id="spectatorPanel" class="hand-panel panel" hidden><h2>你正在旁观牌桌</h2><p class="field-hint">你不参与本局，不会收到手牌。房主仍可管理房间，并在结算后返回大厅。电脑上的 Node 服务需要保持运行。</p></section>
+          </div>
           <details class="mobile-history"><summary>查看牌桌动态</summary><ol id="mobileActivityLog"></ol></details>
         </section>
       </section>
@@ -116,7 +127,7 @@
   <div id="voiceAudio" hidden></div>
   <button id="chatLauncher" class="chat-launcher" aria-controls="chatPanel" aria-expanded="false" hidden><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M5 4h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-6 4V6a2 2 0 0 1 2-2Z"/><path d="M7 9h10M7 13h7"/></svg> 聊天 <b id="chatUnread" hidden>0</b></button>
   <section id="chatPanel" class="chat-panel" aria-label="牌桌聊天" hidden>
-    <header class="chat-header"><div><h2>牌桌聊天<span>一起玩，也一起聊。</span></h2><p>同房间的人都能看到</p></div><button id="chatClose" type="button" class="chat-close" aria-label="关闭聊天">×</button></header>
+    <header class="chat-header"><div><h2>牌桌聊天<span>一起玩，也一起聊。</span></h2><p>同房间的人都能看到</p><div id="chatGameStatus" class="chat-game-status" hidden><span id="chatGameTurn"></span><span id="chatGameColor"></span><strong id="chatGameClock"></strong></div></div><button id="chatClose" type="button" class="chat-close" aria-label="关闭聊天">×</button></header>
     <div class="chat-history"><p id="chatEmpty" class="chat-empty">还没人说话，<br>发个表情打个招呼吧。</p><ol id="chatMessages" class="chat-messages" role="log" aria-live="polite" aria-relevant="additions" aria-label="聊天消息"></ol><button id="chatNewMessages" class="chat-new-messages" hidden>有新消息 ↓</button></div>
     <div id="chatQuick" class="chat-picker" hidden><p class="chat-picker-label">点一下，直接发送</p><div id="chatPhrases" class="chat-phrases"></div><div id="chatEmojis" class="chat-emojis" aria-label="快捷表情"></div></div>
     <div id="chatStickers" class="chat-stickers chat-picker" aria-label="内置表情包" hidden></div>
