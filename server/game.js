@@ -10,6 +10,20 @@ export function requireRule(condition, code, message) {
   if (!condition) throw new RuleError(code, message);
 }
 
+export const DEFAULT_RULES = Object.freeze({ initialCards: 7, autoUno: true, catchUno: true, challengeWild4: true, allowActionMatch: false });
+
+export function normalizeRules(value = {}) {
+  requireRule(value && typeof value === 'object' && !Array.isArray(value), 'INVALID_RULES', '规则设置格式错误');
+  requireRule(Object.keys(value).every(key => Object.hasOwn(DEFAULT_RULES, key)), 'INVALID_RULES', '包含未知规则设置');
+  const rules = { ...DEFAULT_RULES, ...value };
+  requireRule(Number.isInteger(rules.initialCards) && rules.initialCards >= 3 && rules.initialCards <= 10,
+    'INVALID_INITIAL_CARDS', '起始手牌应为 3～10 张');
+  for (const key of ['autoUno', 'catchUno', 'challengeWild4', 'allowActionMatch']) {
+    requireRule(typeof rules[key] === 'boolean', 'INVALID_RULES', '规则开关必须为布尔值');
+  }
+  return rules;
+}
+
 export function buildDeck() {
   const cards = [];
   const add = (kind, color, value) => {
@@ -63,7 +77,7 @@ export function matches(game, card) {
   }
   // House rule: colored action cards follow the active color, never just
   // the symbol. Only black wild cards may ignore color entirely.
-  return false;
+  return !!game.rules?.allowActionMatch && top.kind === card.kind;
 }
 
 function beginTurn(game, playerId) {
@@ -85,7 +99,10 @@ export function drawCards(game, playerId, count, random = randomInt) {
     game.hands[playerId].push(game.drawPile.pop());
     drawn++;
   }
-  if (drawn) game.unoDeclaredIds = game.unoDeclaredIds.filter(id => id !== playerId);
+  if (drawn) {
+    game.unoDeclaredIds = game.unoDeclaredIds.filter(id => id !== playerId);
+    if (game.unoWindow?.playerId === playerId) game.unoWindow = null;
+  }
   return drawn;
 }
 
@@ -102,7 +119,7 @@ function chooseDealer(ids, random) {
   return candidates[random(candidates.length)];
 }
 
-export function createGame(ids, random = randomInt) {
+export function createGame(ids, random = randomInt, ruleSettings = {}) {
   requireRule(ids.length >= 2 && ids.length <= 10, 'INVALID_PLAYERS', '需要 2～10 名玩家');
   const game = {
     id: randomUUID(), phase: 'turn', paused: false,
@@ -110,12 +127,13 @@ export function createGame(ids, random = randomInt) {
     currentPlayerId: null, direction: 1, turnId: 0,
     hands: Object.fromEntries(ids.map(id => [id, []])),
     drawPile: shuffle(buildDeck(), random), discardPile: [], activeColor: null,
+    rules: normalizeRules(ruleSettings), unoWindow: null,
     unoDeclaredIds: [], pendingWild4: null,
     finishOrder: [], ranking: [], lastPlayerId: null,
     provisionalWinnerId: null, winnerId: null, endReason: null,
     dryPassPlayerIds: [], log: [], eventSequence: 0
   };
-  for (let round = 0; round < 7; round++) {
+  for (let round = 0; round < game.rules.initialCards; round++) {
     for (const id of ids) drawCards(game, id, 1, random);
   }
   // Hold rejected +4 cards aside until a valid starter is found; then return
@@ -195,9 +213,22 @@ export function applyCommand(original, actorId, command, random = randomInt, { a
     requireRule(game.hands[actorId].length === 1, 'INVALID_UNO', '只剩一张牌时才能喊 UNO');
     requireRule(!game.unoDeclaredIds.includes(actorId), 'UNO_ALREADY_CALLED', '你已经喊过 UNO 了');
     game.unoDeclaredIds.push(actorId);
+    if (game.unoWindow?.playerId === actorId) game.unoWindow = null;
     note('uno');
+  } else if (command.type === 'CATCH_UNO') {
+    requireRule(game.rules.catchUno, 'CATCH_DISABLED', '本房未开启抓漏');
+    const window = game.unoWindow;
+    requireRule(window && window.id === p.windowId && window.playerId === p.targetPlayerId,
+      'STALE_UNO_WINDOW', '抓漏机会已结束');
+    requireRule(window.playerId !== actorId && game.hands[window.playerId].length === 1 &&
+      !game.unoDeclaredIds.includes(window.playerId), 'INVALID_CATCH', '这位玩家当前不能被抓漏');
+    note('caught_uno', { targetId: window.playerId, count: drawCards(game, window.playerId, 2, random) });
+    game.unoWindow = null;
   } else {
     requireRule(game.currentPlayerId === actorId, 'NOT_YOUR_TURN', '还没有轮到你');
+    // The next accepted turn action closes the previous player's opportunity.
+    // Invalid commands operate on this private copy and cannot close it.
+    game.unoWindow = null;
 
     if (command.type === 'CHOOSE_INITIAL_COLOR') {
       requireRule(game.phase === 'choose_initial_color', 'WRONG_PHASE', '现在不需要选择起始颜色');
@@ -210,6 +241,7 @@ export function applyCommand(original, actorId, command, random = randomInt, { a
       requireRule(game.phase === 'wild4_response' && pending?.id === p.pendingId,
         'STALE_PENALTY', '这次 +4 已经处理');
       if (command.type === 'CHALLENGE_WILD4') {
+        requireRule(game.rules.challengeWild4, 'CHALLENGE_DISABLED', '本房未开启 +4 质疑');
         evidence = { pendingId: pending.id, actorId: pending.actorId,
           previousColor: pending.previousColor, handBeforePlay: pending.handBeforePlay,
           wasLegal: pending.wasLegal };
@@ -253,9 +285,11 @@ export function applyCommand(original, actorId, command, random = randomInt, { a
         game.activeColor = wild ? p.chosenColor : card.color;
         game.dryPassPlayerIds = [];
         note('played', { card, color: game.activeColor, targetId: nextPlayer(game, actorId) });
-        if (hand.length === 1 && p.declareUno) {
+        if (hand.length === 1 && (game.rules.autoUno || p.declareUno)) {
           game.unoDeclaredIds.push(actorId);
           note('uno');
+        } else if (hand.length === 1 && game.rules.catchUno) {
+          game.unoWindow = { id: randomUUID(), playerId: actorId };
         }
         if (!hand.length) game.provisionalWinnerId = actorId;
         if (card.kind === 'reverse') {
@@ -270,8 +304,15 @@ export function applyCommand(original, actorId, command, random = randomInt, { a
           note('penalty', { targetId, count: drawCards(game, targetId, 2, random) });
           beginTurn(game, nextPlayer(game, targetId));
         } else if (card.kind === 'wild4') {
-          beginTurn(game, game.pendingWild4.targetId);
-          game.phase = 'wild4_response';
+          const targetId = game.pendingWild4.targetId;
+          if (game.rules.challengeWild4) {
+            beginTurn(game, targetId);
+            game.phase = 'wild4_response';
+          } else {
+            note('accepted', { playerId: targetId, count: drawCards(game, targetId, 4, random) });
+            game.pendingWild4 = null;
+            beginTurn(game, nextPlayer(game, targetId));
+          }
         } else beginTurn(game, nextPlayer(game, actorId));
         finishIfReady(game, note);
       } else if (command.type === 'DRAW_CARD') {
@@ -335,6 +376,8 @@ export function gameView(game, playerId) {
       topCard: game.discardPile.at(-1), drawPileCount: game.drawPile.length,
       winnerId: game.winnerId, endReason: game.endReason,
       unoDeclaredIds: game.unoDeclaredIds,
+      rules: game.rules,
+      unoWindow: game.unoWindow,
       pendingWild4: game.pendingWild4 ? {
         id: game.pendingWild4.id, actorId: game.pendingWild4.actorId,
         targetId: game.pendingWild4.targetId
@@ -349,7 +392,9 @@ export function gameView(game, playerId) {
       canDraw: myTurn && game.phase === 'turn',
       canChooseInitialColor: myTurn && game.phase === 'choose_initial_color',
       canRespondWild4: myTurn && game.phase === 'wild4_response',
-      canCallUno: isParticipating && !isFinished && !game.paused && game.phase !== 'finished' && hand.length === 1 && !game.unoDeclaredIds.includes(playerId)
+      canCallUno: isParticipating && !isFinished && !game.paused && game.phase !== 'finished' && hand.length === 1 && !game.unoDeclaredIds.includes(playerId),
+      canCatchUno: isParticipating && !isFinished && !game.paused && game.phase !== 'finished' &&
+        !!game.unoWindow && game.unoWindow.playerId !== playerId
     }
   };
 }

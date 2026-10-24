@@ -1,4 +1,7 @@
 node_modules/
+.certs/
+compose.override.yaml
+artifacts/
 .npm-cache/
 *.log
 .DS_Store

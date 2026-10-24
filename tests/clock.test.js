@@ -88,3 +88,25 @@ test('host timer setting validation is atomic and unavailable after starting', (
   manager.execute(host, { type: 'ROOM_UPDATE', payload: { turnSeconds: 60 } });
   assert.equal(room.turnSeconds, 60);
 });
+
+test('personal time overrides default for each turn and rules are host-only and frozen during play', () => {
+  const { manager, room, host, players, command, setNow } = setup();
+  room.status = 'waiting'; room.game = null;
+  const nextSettings = { turnSeconds: 45, turnSecondsByPlayer: { [players[0].id]: 90 },
+    rules: { initialCards: 5, catchUno: true, challengeWild4: true, allowActionMatch: true } };
+  assert.throws(() => manager.execute(players[0], { type: 'ROOM_UPDATE', payload: nextSettings }), { code: 'HOST_ONLY' });
+  manager.execute(host, { type: 'ROOM_UPDATE', payload: nextSettings });
+  const before = structuredClone(room);
+  assert.throws(() => manager.execute(host, { type: 'ROOM_UPDATE', payload: { rules: { initialCards: 99 }, turnSeconds: 30 } }), { code: 'INVALID_INITIAL_CARDS' });
+  assert.deepEqual(structuredClone(room), before);
+  assert.throws(() => manager.execute(host, { type: 'ROOM_UPDATE', payload: { turnSecondsByPlayer: { stranger: 60 } } }), { code: 'INVALID_PLAYER_TIMES' });
+  assert.deepEqual(structuredClone(room), before);
+  manager.execute(host, { type: 'GAME_START', payload: {} });
+  assert.equal(room.game.rules.initialCards, 5);
+  room.game.phase = 'turn'; room.game.currentPlayerId = players[0].id;
+  manager.startClock(room);
+  assert.equal(room.turnClock.durationMs, 90000);
+  setNow(room.turnClock.startsAt); command();
+  assert.equal(room.turnClock.durationMs, 45000);
+  assert.throws(() => manager.execute(host, { type: 'ROOM_UPDATE', payload: nextSettings }), { code: 'GAME_STARTED' });
+});

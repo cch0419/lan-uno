@@ -1,0 +1,10 @@
+.git
+node_modules
+.certs
+.npm-cache
+artifacts
+.env
+.env.*
+tools
+compose.override.yaml
+*.log

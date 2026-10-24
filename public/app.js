@@ -1,6 +1,11 @@
 import { layoutSeats } from './table-layout.js';
 import { createEffects } from './effects.js';
 import { websocketUrl, invitation } from './network-client.js';
+import { sortHand, fanHandLayout } from './hand-layout.js';
+import { createSounds } from './sounds.js';
+import { createVoice } from './voice.js';
+import { createChat } from './chat.js';
+import { createSocial } from './social.js';
 
 const $ = id => document.getElementById(id);
 const colorNames = { red: '红色', yellow: '黄色', green: '绿色', blue: '蓝色' };
@@ -31,9 +36,14 @@ let freshCardIds = new Set();
 let serverOffset = 0;
 let lastClockReady = false;
 let networkConfig = null;
+let lobbyDraft = null;
+let handSorted = false;
+const handMotions = new Map();
+let lastHandWidth = 0;
 const requests = new Map();
 const clientPrefix = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-const effects = createEffects({ createCard: card => cardElement(card), getState: () => state, playerName: nameOf });
+const effects = createEffects({ createCard: card => cardElement(card), getState: () => state, playerName: nameOf,
+  playSound: event => sounds.playEvent(event) });
 
 // Storage can be unavailable in private/restricted browsers; the game still
 // works for this tab, but recovery then lasts only for this page lifetime.
@@ -46,6 +56,12 @@ function writeStorage(key, value) {
   memoryStorage.set(key, value);
   try { localStorage.setItem(key, value); } catch { /* session-only fallback */ }
 }
+
+const sounds = createSounds({ readStorage, writeStorage });
+const voice = createVoice({ send: request, notify: toast });
+const chat = createChat({ send: request, notify: toast });
+const social = createSocial({ getState: () => state, send: request, notify: toast,
+  stopVoice: () => voice.stopSpeaking() });
 
 function toast(message, error = false) {
   clearTimeout(toastTimer);
@@ -93,6 +109,7 @@ function connect() {
     if (socket !== thisSocket) return;
     clearTimeout(handshakeTimer);
     ready = false;
+    voice.disconnect(); chat.disconnect(); social.disconnect();
     connectReject?.(new Error('连接失败，请确认主机服务正在运行'));
     connectPromise = null; connectResolve = null; connectReject = null;
     for (const entry of requests.values()) { clearTimeout(entry.timer); entry.reject(new Error('连接已断开，恢复后将同步最新状态')); }
@@ -123,10 +140,10 @@ function request(type, payload = {}) {
 }
 
 async function execute(type, payload = {}) {
-  if (busy || animating) return;
+  if (busy || animating) return false;
   busy = true; render();
-  try { await connect(); await request(type, payload); }
-  catch (error) { toast(error.message, true); }
+  try { await connect(); await request(type, payload); return true; }
+  catch (error) { toast(error.message, true); return false; }
   finally { busy = false; render(); }
 }
 
@@ -146,6 +163,7 @@ function receive({ type, payload }) {
     if (payload.previousSessionExpired) toast('之前的会话已失效，已建立新身份。服务重启后需要重新建房。');
     render();
   } else if (type === 'STATE') {
+    voice.setRoom(payload); chat.setRoom(payload); social.setRoom(payload);
     if (payload?.serverTime) serverOffset = payload.serverTime - Date.now();
     enqueueSnapshot(payload);
   } else if (type === 'COMMAND_RESULT') {
@@ -160,11 +178,22 @@ function receive({ type, payload }) {
       socket.close();
     }
   } else if (type === 'ROOM_CLOSED') {
+    voice.disconnect(); chat.setRoom(null); social.setRoom(null);
     enqueueSnapshot(null);
     toast('房间已解散'); render();
   } else if (type === 'SESSION_REPLACED') {
+    voice.disconnect(); chat.disconnect(); social.disconnect();
     shouldReconnect = false; ready = false;
     toast('你已在另一个标签页入座。此窗口停止连接。'); render();
+  } else if (type === 'VOICE_ROSTER' || type === 'VOICE_SIGNAL') {
+    voice.receive(type, payload);
+  } else if (type === 'VOICE_ACTIVITY') {
+    social.voiceActivity(payload);
+  } else if (type === 'CHAT_HISTORY' || type === 'CHAT_MESSAGE') {
+    chat.receive(type, payload);
+    if (type === 'CHAT_MESSAGE') social.chatMessage(payload);
+  } else if (type === 'SOCIAL') {
+    social.receive(payload);
   } else if (type === 'CHALLENGE_EVIDENCE') {
     $('evidenceTitle').textContent = payload.wasLegal ? '质疑失败' : '质疑成功';
     $('evidenceText').textContent = `${nameOf(payload.actorId)} 出牌前的生效颜色是${colorNames[payload.previousColor]}。${payload.wasLegal ? '手中没有该颜色的牌，你罚抽 6 张并跳过。' : '手中有该颜色的牌，对方罚抽 4 张，继续你的回合。'}`;
@@ -174,6 +203,8 @@ function receive({ type, payload }) {
 }
 
 function commitSnapshot(next) {
+  if (state?.game?.id !== next?.game?.id) handSorted = false;
+  if (state?.roomCode !== next?.roomCode || next?.game) lobbyDraft = null;
   state = next;
   const fingerprint = state?.game ? `${state.game.id}:${state.game.turnId}:${state.you.hand.map(c => c.id).join(',')}` : '';
   if (fingerprint !== handFingerprint) { unoArmed = false; handFingerprint = fingerprint; }
@@ -191,7 +222,7 @@ function enqueueSnapshot(next) {
   if (!next?.game || !state?.game || next.game.id !== state.game.id || next.game.paused) {
     const previous = state;
     visualEpoch++;
-    effects.reset(); snapshotQueue = []; animating = false; freshCardIds.clear();
+    effects.reset(); sounds.reset(); snapshotQueue = []; animating = false; freshCardIds.clear();
     commitSnapshot(next); render(); effects.afterSnapshot(previous, next, []);
     return;
   }
@@ -216,6 +247,7 @@ async function drainSnapshots() {
         catch (error) { console.error('Animation skipped:', error); }
       }
       if (epoch !== visualEpoch) continue;
+      if (!skipAnimation) sounds.afterSnapshot(previous, next, events);
       const oldIds = new Set(previous.you.hand.map(card => card.id));
       freshCardIds = new Set(next.you.hand.filter(card => !oldIds.has(card.id)).map(card => card.id));
       animating = snapshotQueue.length > 0;
@@ -239,7 +271,7 @@ function cardElement(card, interactive = false, playable = false) {
   node.dataset.cardId = card.id;
   node.title = describeCard(card);
   const symbol = card.kind === 'number' ? String(card.value) : symbols[card.kind];
-  node.append(element('span', 'card-corner', symbol), element('span', 'card-center', symbol),
+  node.append(element('span', 'card-corner', card.kind === 'wild' ? 'W' : symbol), element('span', 'card-center', symbol),
     element('span', 'card-color-label', colorNames[card.color] ?? '任意颜色'));
   if (interactive) {
     node.disabled = !ready || busy || animating || !playable;
@@ -264,6 +296,7 @@ function showConfirm(title, text, callback) {
 
 function render() {
   renderSharing();
+  $('chatGameStatus').hidden = !state?.game;
   document.body.classList.toggle('in-game', !!state?.game);
   $('home').hidden = !!state;
   $('room').hidden = !state;
@@ -285,9 +318,12 @@ function render() {
   $('pauseBanner').textContent = `等待 ${state.players.filter(p => p.isParticipating && !p.isFinished && !p.online).map(p => p.nickname).join('、')} 重新连接。计时已暂停；掉线保留 ${state.disconnectGraceSeconds} 秒，超时会中止本局。`;
   if (!state.game) renderLobby(host, enabled);
   else renderGame(host, enabled);
+  social.render();
 }
 
 function renderLobby(host, enabled) {
+  if (!lobbyDraft || !lobbyDraft.dirty) lobbyDraft = { dirty: false, maxPlayers: state.maxPlayers,
+    turnSeconds: state.turnSeconds, rules: { ...state.rules }, times: { ...state.turnSecondsByPlayer } };
   const participants = state.players.filter(player => player.isParticipating);
   const spectatorCount = state.players.length - participants.length;
   $('playerCount').textContent = `玩家 ${participants.length} / ${state.maxPlayers}${spectatorCount ? ` · 旁观 ${spectatorCount}` : ''}`;
@@ -297,8 +333,20 @@ function renderLobby(host, enabled) {
     row.append(element('span', 'avatar', [...player.nickname][0]));
     const detail = element('div', 'player-detail');
     detail.append(element('strong', '', `${player.nickname}${player.id === state.you.playerId ? '（你）' : ''}`),
-      element('small', '', `${player.id === state.hostId ? '房主 · ' : ''}${player.isParticipating ? '玩家' : '仅管理／旁观'} · ${player.online ? '在线' : '暂时离线'}`));
+      element('small', '', `${player.id === state.hostId ? '房主 · ' : ''}${player.isParticipating ? '玩家' : '仅管理／旁观'} · ${player.online ? '在线' : '暂时离线'}${player.isParticipating ? ` · ${state.turnSecondsByPlayer[player.id] ?? state.turnSeconds} 秒` : ''}`));
     row.append(detail);
+    if (host && player.isParticipating) {
+      const label = element('label', 'player-time', '个人秒数');
+      const input = element('input'); input.type = 'number'; input.min = '15'; input.max = '120';
+      input.placeholder = `默认 ${lobbyDraft.turnSeconds}`; input.value = lobbyDraft.times[player.id] ?? '';
+      input.setAttribute('aria-label', `${player.nickname}的回合秒数`); input.disabled = !enabled;
+      input.oninput = () => {
+        lobbyDraft.dirty = true;
+        if (input.value === '') delete lobbyDraft.times[player.id];
+        else lobbyDraft.times[player.id] = Number(input.value);
+      };
+      label.append(input); row.append(label);
+    }
     if (host && player.online && player.id !== state.you.playerId) {
       const transfer = element('button', 'text-button transfer', '移交房主');
       transfer.disabled = !enabled;
@@ -308,12 +356,19 @@ function renderLobby(host, enabled) {
     $('lobbyPlayers').append(row);
   }
   $('hostSettings').hidden = !host;
+  $('ruleSettings').hidden = !host;
   $('participationSetting').hidden = !host;
   $('roomHostParticipates').checked = state.you.isParticipating;
   $('roomHostParticipates').disabled = !enabled;
-  if (document.activeElement !== $('roomCapacity')) $('roomCapacity').value = state.maxPlayers;
-  if (document.activeElement !== $('turnSeconds')) $('turnSeconds').value = state.turnSeconds;
-  $('timerSettingHint').textContent = `每回合 ${state.turnSeconds} 秒 · 超时自动摸一张并结束回合 · 房主可设置 15～120 秒`;
+  $('roomCapacity').value = lobbyDraft.maxPlayers;
+  $('turnSeconds').value = lobbyDraft.turnSeconds;
+  $('initialCards').value = lobbyDraft.rules.initialCards;
+  $('autoUnoEnabled').checked = lobbyDraft.rules.autoUno;
+  $('catchUnoEnabled').checked = lobbyDraft.rules.catchUno;
+  $('challengeWild4Enabled').checked = lobbyDraft.rules.challengeWild4;
+  $('allowActionMatch').checked = lobbyDraft.rules.allowActionMatch;
+  for (const id of ['roomCapacity', 'turnSeconds', 'initialCards', 'autoUnoEnabled', 'catchUnoEnabled', 'challengeWild4Enabled', 'allowActionMatch']) $(id).disabled = !enabled;
+  $('timerSettingHint').textContent = `默认 ${state.turnSeconds} 秒 · 起始 ${state.rules.initialCards} 张 · ${state.rules.autoUno ? '自动 UNO' : '手动 UNO'} · 抓漏${state.rules.catchUno ? '开启（仅手动模式有漏喊）' : '关闭'} · +4 质疑${state.rules.challengeWild4 ? '开启' : '关闭'}。个人时间留空使用默认，超时摸一张并结束回合。`;
   $('saveCapacity').disabled = !enabled;
   $('roomInfo').textContent = state.info;
   $('startGame').hidden = !host;
@@ -356,6 +411,7 @@ function renderGame(host, enabled) {
   $('handPanel').hidden = !you.isParticipating;
   $('spectatorPanel').hidden = you.isParticipating;
   $('tableMode').textContent = you.isParticipating ? '你坐在下方 · 按座次依次行动' : '房主管理视角 · 旁观本局';
+  $('ruleReminder').textContent = `彩色功能牌${game.rules.allowActionMatch ? '可跟同色或同功能' : '只跟当前颜色'}；摸牌结束回合。抓漏${game.rules.catchUno ? '开启' : '关闭'}，+4 质疑${game.rules.challengeWild4 ? '开启' : '关闭'}。`;
   renderSeats(game, you.playerId);
   $('roundTable').dataset.color = game.activeColor ?? 'green';
   const clockwise = game.direction === 1;
@@ -370,8 +426,10 @@ function renderGame(host, enabled) {
     node.firstElementChild.textContent = arrow;
     node.lastElementChild.textContent = directionLabel;
   }
-  $('activeColor').textContent = game.activeColor ? `跟${colorNames[game.activeColor]}` : '先选一个颜色';
-  $('turnText').textContent = game.phase === 'finished' ? '本局结束' : game.paused ? '等待朋友重新连接' : myTurn ? '你的回合 · 出牌或摸一张' : `${nameOf(game.currentPlayerId)} 正在行动`;
+  $('roundTable').setAttribute('aria-label', `${colorNames[game.activeColor] ?? '待选色'}牌桌`);
+  $('catchUnoNotice').hidden = !actions.canCatchUno;
+  $('catchUnoText').textContent = game.unoWindow ? `${nameOf(game.unoWindow.playerId)} 剩一张，尚未喊 UNO！` : '';
+  $('catchUno').disabled = !enabled || !actions.canCatchUno;
   if ($('topCard').firstElementChild?.dataset.cardId !== game.topCard.id) {
     const card = cardElement(game.topCard);
     if ($('topCard').firstElementChild) card.classList.add('card-settle');
@@ -380,10 +438,11 @@ function renderGame(host, enabled) {
   $('deckCount').textContent = `牌堆剩 ${game.drawPileCount} 张`;
   $('phaseText').textContent = {
     choose_initial_color: '起始牌为黑色，先选择本局颜色',
-    turn: myTurn ? '数字可同号 · 彩色功能牌只跟颜色' : '高亮座位正在出牌',
-    wild4_response: `${nameOf(game.currentPlayerId)} 选择接受或质疑 +4`,
+    turn: '',
+    wild4_response: '+4 回应中',
     finished: '本局已完成结算'
   }[game.phase];
+  $('phaseText').hidden = game.phase === 'turn' || game.phase === 'finished';
   $('wildResponse').hidden = !actions.canRespondWild4;
   $('acceptWild4').disabled = !actionEnabled;
   $('challengeWild4').disabled = !actionEnabled;
@@ -391,12 +450,14 @@ function renderGame(host, enabled) {
   $('initialColor').disabled = !actionEnabled;
   $('drawPile').disabled = !actionEnabled || !actions.canDraw;
   $('drawCard').disabled = !actionEnabled || !actions.canDraw;
-  const canArm = myTurn && !game.paused && game.phase === 'turn' && you.hand.length === 2;
+  const canArm = !game.rules.autoUno && myTurn && !game.paused && game.phase === 'turn' && you.hand.length === 2;
+  $('callUno').hidden = game.rules.autoUno;
   $('callUno').disabled = !enabled || !(canArm || actions.canCallUno);
   $('callUno').classList.toggle('armed', unoArmed);
   $('callUno').textContent = unoArmed ? '已选 ✓' : game.unoDeclaredIds.includes(you.playerId) ? 'UNO ✓' : 'UNO!';
   $('handCount').textContent = you.hand.length;
-  $('handHint').textContent = you.isFinished ? `你已获得第 ${you.rank} 名，继续看看朋友们的对决吧！` : !ready ? '连接恢复后才能操作' : animating || !clockReady() ? '等牌落桌，慢慢来…' : unoArmed ? '下一张牌同时喊 UNO' : myTurn ? '点描边牌出牌 · 左右滑动看手牌' : '等你出牌 · 手牌可左右滑动';
+  $('sortHand').disabled = busy || animating || !you.hand.length;
+  $('handHint').textContent = you.isFinished ? `你已获得第 ${you.rank} 名，继续看看朋友们的对决吧！` : !ready ? '连接恢复后才能操作' : animating || !clockReady() ? '等牌落桌，慢慢来…' : unoArmed ? '下一张牌同时喊 UNO' : myTurn ? `点描边牌出牌${game.rules.autoUno ? ' · 剩一张自动喊 UNO' : ' · 左上角看数字'}` : '扇形手牌 · 左上角看牌面';
   if (game.phase === 'finished') $('handHint').textContent = you.rank ? `本局第 ${you.rank} 名 · 下一局再战！` : '本局已结束';
   renderHand(you.hand, actions.playableCardIds, actionEnabled);
   updateClock();
@@ -455,21 +516,50 @@ function renderSeats(game, viewerId) {
 
 function renderHand(cards, playableIds, enabled) {
   const container = $('hand');
+  cards = handSorted ? sortHand(cards) : cards;
+  const changed = lastHandWidth !== container.clientWidth || [...container.children].map(n => n.dataset.cardId).join(',') !== cards.map(c => c.id).join(',');
+  lastHandWidth = container.clientWidth;
+  const before = changed ? new Map([...container.children].map(node => [node.dataset.cardId, node.getBoundingClientRect()])) : null;
+  if (changed) { for (const motion of handMotions.values()) motion.cancel(); handMotions.clear(); }
   const existing = new Map([...container.children].map(node => [node.dataset.cardId, node]));
   const ids = new Set(cards.map(card => card.id));
+  const created = new Set();
   for (const node of [...container.children]) if (!ids.has(node.dataset.cardId)) node.remove();
   cards.forEach((card, index) => {
     const playable = playableIds.includes(card.id);
     let node = existing.get(card.id);
     if (!node) {
       node = cardElement(card, true, playable);
-      if (freshCardIds.has(card.id)) node.classList.add('drawn-in');
+      created.add(node);
     }
     node.disabled = !enabled || !playable;
     node.classList.toggle('playable', playable);
     node.classList.remove('leaving');
     if (container.children[index] !== node) container.insertBefore(node, container.children[index] ?? null);
   });
+  const sample = container.firstElementChild;
+  const layout = fanHandLayout(cards.length, container.clientWidth, sample?.offsetWidth ?? 73, sample?.offsetHeight ?? 105);
+  container.style.height = `${layout.height}px`;
+  $('handPanel').classList.toggle('fan-multiple', layout.rows > 1);
+  [...container.children].forEach((node, index) => {
+    const position = layout.positions[index];
+    node.style.left = `${position.x}px`; node.style.top = `${position.y}px`;
+    node.style.setProperty('--fan-angle', `${position.angle}deg`);
+    node.style.setProperty('--fan-depth', position.row * 100 + position.zIndex);
+  });
+  if (changed && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    for (const node of container.children) {
+      const old = before.get(node.dataset.cardId);
+      const next = node.getBoundingClientRect();
+      const dx = old ? old.left - next.left : 0; const dy = old ? old.top - next.top : -20;
+      if (!created.has(node) && Math.abs(dx) + Math.abs(dy) < 1) continue;
+      const finalTransform = getComputedStyle(node).transform;
+      const motion = node.animate([{ transform: `translate(${dx}px,${dy}px) ${finalTransform}`, opacity: created.has(node) ? 0 : 1 }, { transform: finalTransform, opacity: 1 }],
+        { duration: 650, easing: 'cubic-bezier(.22,.8,.2,1)' });
+      handMotions.set(node, motion);
+      motion.finished.catch(() => {}).finally(() => { if (handMotions.get(node) === motion) handMotions.delete(node); });
+    }
+  }
 }
 
 // The server owns the deadline; client timers only paint the remaining time.
@@ -482,14 +572,20 @@ function clockReady() {
 function updateClock() {
   const clock = state?.game?.clock;
   $('turnClock').hidden = !clock;
-  if (!clock) return;
+  if (!clock) {
+    if (state?.game) { $('chatGameTurn').textContent = '本局结束'; $('chatGameColor').textContent = ''; $('chatGameClock').textContent = ''; }
+    return;
+  }
   const now = Date.now() + serverOffset;
   const settling = !clock.paused && now < clock.startsAt;
+  $('chatGameTurn').textContent = clock.paused ? '对局暂停' : state.game.currentPlayerId === state.you.playerId ? '轮到你了' : `${nameOf(state.game.currentPlayerId)}的回合`;
+  $('chatGameColor').textContent = colorNames[state.game.activeColor] ?? '待选色';
+  $('chatGameClock').textContent = clock.paused ? '暂停' : settling || animating ? '落牌中' : `${Math.max(0, Math.ceil((clock.deadlineAt - now) / 1000))}s`;
   const remaining = clock.paused ? clock.remainingMs : Math.max(0, clock.deadlineAt - Math.max(now, clock.startsAt));
   $('clockSeconds').textContent = animating ? '…' : `${Math.ceil(remaining / 1000)}s`;
   $('clockLabel').textContent = clock.paused ? '已暂停' : settling || animating ? '牌落桌后开始计时' : remaining === 0 ? '超时处理中' : state.game.phase === 'wild4_response' ? '回应倒计时' : '出牌倒计时';
   $('turnClock').classList.toggle('urgent', !clock.paused && !settling && remaining <= 10000);
-  $('clockProgress').style.width = `${Math.min(100, remaining / (state.turnSeconds * 1000) * 100)}%`;
+  $('clockProgress').style.width = `${Math.min(100, remaining / (clock.durationMs ?? state.turnSeconds * 1000) * 100)}%`;
 }
 
 setInterval(() => {
@@ -505,6 +601,7 @@ function eventText(event) {
     case 'played': return `${who} 出了${describeCard(event.card)}${event.card.color ? '' : `，选择${colorNames[event.color]}`}`;
     case 'drawn': return `${who} 摸了 ${event.count} 张，回合结束`;
     case 'uno': return `${who}：UNO！`;
+    case 'caught_uno': return `${who} 抓漏成功，${nameOf(event.targetId)} 罚抽 ${event.count} 张`;
     case 'timeout': return `${who} 回合超时，自动处理`;
     case 'player_finished': return `${who} 第 ${event.rank} 名完赛，其他玩家继续`;
     case 'skipped': return `${nameOf(event.targetId)} 被跳过一轮`;
@@ -528,7 +625,18 @@ $('createRoom').onclick = () => execute('ROOM_CREATE', {
 $('joinRoom').onclick = () => execute('ROOM_JOIN', { code: $('joinCode').value.trim() });
 $('joinCode').onkeydown = event => { if (event.key === 'Enter') $('joinRoom').click(); };
 $('startGame').onclick = () => execute('GAME_START');
-$('saveCapacity').onclick = () => execute('ROOM_UPDATE', { maxPlayers: Number($('roomCapacity').value), turnSeconds: Number($('turnSeconds').value) });
+$('roomCapacity').onchange = () => { lobbyDraft.dirty = true; lobbyDraft.maxPlayers = Number($('roomCapacity').value); };
+$('turnSeconds').oninput = () => { lobbyDraft.dirty = true; lobbyDraft.turnSeconds = Number($('turnSeconds').value); };
+$('initialCards').oninput = () => { lobbyDraft.dirty = true; lobbyDraft.rules.initialCards = Number($('initialCards').value); };
+for (const [id, key] of [['autoUnoEnabled', 'autoUno'], ['catchUnoEnabled', 'catchUno'], ['challengeWild4Enabled', 'challengeWild4'], ['allowActionMatch', 'allowActionMatch']]) {
+  $(id).onchange = () => { lobbyDraft.dirty = true; lobbyDraft.rules[key] = $(id).checked; };
+}
+$('saveCapacity').onclick = async () => {
+  const times = Object.fromEntries(Object.entries(lobbyDraft.times).filter(([id]) => state.players.some(p => p.id === id)));
+  const saved = await execute('ROOM_UPDATE', { maxPlayers: lobbyDraft.maxPlayers, turnSeconds: lobbyDraft.turnSeconds,
+    rules: { ...lobbyDraft.rules }, turnSecondsByPlayer: times });
+  if (saved) { lobbyDraft = null; render(); toast('房间设置已保存'); }
+};
 $('roomHostParticipates').onchange = () => execute('ROOM_UPDATE', { hostParticipates: $('roomHostParticipates').checked });
 $('leaveRoom').onclick = () => state?.status === 'playing' && state.you.isParticipating && !state.you.isFinished
   ? showConfirm('离开这张牌桌？', '离开会中止本局，所有其他玩家返回等待大厅。', () => execute('ROOM_LEAVE'))
@@ -542,6 +650,12 @@ $('callUno').onclick = () => {
   if (state?.actions.canCallUno) gameCommand('CALL_UNO');
   else { unoArmed = !unoArmed; render(); }
 };
+$('catchUno').onclick = () => {
+  const window = state?.game?.unoWindow;
+  if (window) gameCommand('CATCH_UNO', { windowId: window.id, targetPlayerId: window.playerId });
+};
+$('sortHand').onclick = () => { handSorted = true; render(); };
+window.addEventListener('resize', () => { if (state?.game) render(); });
 $('acceptWild4').onclick = () => gameCommand('ACCEPT_WILD4', { pendingId: state.game.pendingWild4.id });
 $('challengeWild4').onclick = () => gameCommand('CHALLENGE_WILD4', { pendingId: state.game.pendingWild4.id });
 $('initialColor').onclick = () => openColors();

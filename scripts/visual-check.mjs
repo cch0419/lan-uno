@@ -4,7 +4,7 @@
 import { createInterface } from 'node:readline';
 import { randomUUID } from 'node:crypto';
 import { createServer } from '../server/index.js';
-import { buildDeck, createGame, assertGame } from '../server/game.js';
+import { buildDeck, createGame, applyCommand, assertGame } from '../server/game.js';
 
 const app = await createServer();
 app.server.listen(3002, '127.0.0.1', () => console.log('Visual QA: http://localhost:3002'));
@@ -26,7 +26,9 @@ function prepare(kind) {
     bots.push(app.manager.players.get(socket.playerId));
   }
   for (const bot of bots.slice(0, count - 1)) app.manager.join(bot, room.code);
+  if (kind === 'lobby') { app.manager.publish(room); console.log(`Prepared lobby ${room.code}`); return; }
   const game = createGame(room.playerIds);
+  game.rules.autoUno = kind !== 'catch';
   const pack = buildDeck();
   function take(kind, color = 'red', value) {
     const i = pack.findIndex(c => c.kind === kind && (c.color === color || color === null) && (value === undefined || c.value === value));
@@ -41,6 +43,7 @@ function prepare(kind) {
   else if (kind === 'uno') pack.push(...hands.slice(0, -2));
   for (const id of room.playerIds.slice(1)) for (let i = 0; i < 7; i++) game.hands[id].push(pack.pop());
   game.discardPile = [take('number', 'red', 5)];
+  if (kind === 'many') game.hands[host.id].push(...pack.splice(-17));
   game.drawPile = pack; game.activeColor = 'red'; game.currentPlayerId = host.id;
   game.phase = 'turn'; game.direction = 1; game.turnId = 1; game.eventSequence = 0;
   game.log = []; game.pendingWild4 = null; game.unoDeclaredIds = [];
@@ -57,7 +60,17 @@ function prepare(kind) {
     game.hands[host.id].unshift(game.hands[host.id].splice(index, 1)[0]);
   }
   assertGame(game);
-  room.game = game; room.status = 'playing'; room.revision++;
+  room.game = game;
+  if (kind === 'catch' || kind === 'respond') {
+    const actor = room.playerIds[1];
+    pack.push(...game.hands[actor]);
+    game.hands[actor] = [take(kind === 'respond' ? 'wild4' : 'number', kind === 'respond' ? null : 'red', kind === 'respond' ? undefined : 1), take('number', 'red', 2)];
+    game.currentPlayerId = actor;
+    game.direction = -1;
+    room.game = applyCommand(game, actor, { type: 'PLAY_CARD', payload: { gameId: game.id, turnId: game.turnId,
+      cardId: game.hands[actor][0].id, chosenColor: 'blue' } }).game;
+  }
+  room.status = 'playing'; room.revision++;
   room.turnSeconds = kind === 'timeout' ? 15 : 120;
   app.manager.startClock(room);
   app.manager.publish(room);
@@ -67,6 +80,17 @@ const input = createInterface({ input: process.stdin });
 input.on('line', line => {
   const [kind, size] = line.trim().split(/\s+/);
   try {
+    if (kind === 'social') {
+      // Synthetic activity only: this fixture never opens a real microphone.
+      const host = [...app.manager.players.values()].find(p => p.socket && !p.socket.isVisualBot);
+      const room = app.manager.roomFor(host);
+      const actor = app.manager.players.get(room.playerIds[1]);
+      const speaker = app.manager.players.get(room.playerIds[2]);
+      app.manager.social.command(actor, 'SOCIAL_TEXT', { gameId: room.game.id, text: '好牌！下一轮看我的 😎' });
+      app.manager.voice.handle(speaker, 'VOICE_JOIN', { roomCode: room.code, mic: true, listening: true });
+      setTimeout(() => { if (app.manager.rooms.has(room.code)) app.manager.voice.leave(speaker.id); }, 4000);
+      console.log('Synthetic speech bubble and speaking icon sent.'); return;
+    }
     if (kind === 'table') count = Math.max(2, Math.min(10, Number(size) || 6));
     prepare(kind);
   } catch (error) { console.error(error); }
