@@ -67,6 +67,23 @@ test('HTTP serves only local assets, rejects wrong Host and foreign WebSocket Or
   assert.equal(response.status, 200);
   assert.match(await response.text(), /局域网牌桌/);
   assert.equal((await fetch(`http://127.0.0.1:${port}/styles.css`)).status, 200);
+  const sounds = await fetch(`http://127.0.0.1:${port}/sounds.js`);
+  assert.equal(sounds.status, 200);
+  assert.match(sounds.headers.get('content-type'), /javascript/);
+  const voice = await fetch(`http://127.0.0.1:${port}/audio/uno.wav`);
+  assert.equal(voice.status, 200);
+  assert.equal(voice.headers.get('content-type'), 'audio/wav');
+  const wave = Buffer.from(await voice.arrayBuffer());
+  assert.equal(wave.toString('ascii', 0, 4), 'RIFF');
+  assert.equal(wave.toString('ascii', 8, 12), 'WAVE');
+  assert.ok(wave.length > 1000);
+  const victory = await fetch(`http://127.0.0.1:${port}/audio/victory.wav`);
+  assert.equal(victory.status, 200);
+  assert.equal(victory.headers.get('content-type'), 'audio/wav');
+  const victoryWave = Buffer.from(await victory.arrayBuffer());
+  assert.equal(victoryWave.toString('ascii', 0, 4), 'RIFF');
+  assert.equal(victoryWave.toString('ascii', 8, 12), 'WAVE');
+  assert.ok(victoryWave.length > 1000);
   assert.equal((await fetch(`http://127.0.0.1:${port}/server/game.js`)).status, 404);
   // Fetch may normalize/replace Host. Use raw HTTP to test a hostile header.
   const wrongHostStatus = await new Promise((resolve, reject) => {

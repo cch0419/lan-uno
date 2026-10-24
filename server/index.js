@@ -21,7 +21,10 @@ export async function createServer(options = {}) {
     ['/styles.css', 'styles.css', 'text/css; charset=utf-8'],
     ['/game.css', 'game.css', 'text/css; charset=utf-8'],
     ['/table-layout.js', 'table-layout.js', 'text/javascript; charset=utf-8'],
-    ['/effects.js', 'effects.js', 'text/javascript; charset=utf-8']
+    ['/effects.js', 'effects.js', 'text/javascript; charset=utf-8'],
+    ['/sounds.js', 'sounds.js', 'text/javascript; charset=utf-8'],
+    ['/audio/uno.wav', 'audio/uno.wav', 'audio/wav'],
+    ['/audio/victory.wav', 'audio/victory.wav', 'audio/wav']
   ]) {
     files.set(route, { body: await readFile(new URL(`../public/${file}`, import.meta.url)), mime });
   }

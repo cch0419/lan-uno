@@ -1,5 +1,6 @@
 import { layoutSeats } from './table-layout.js';
 import { createEffects } from './effects.js';
+import { createSounds } from './sounds.js';
 
 const $ = id => document.getElementById(id);
 const colorNames = { red: '红色', yellow: '黄色', green: '绿色', blue: '蓝色' };
@@ -18,8 +19,6 @@ let connectReject;
 let handshakeTimer;
 let toastTimer;
 let requestSequence = 0;
-let unoArmed = false;
-let handFingerprint = '';
 let colorSelection = null;
 let confirmAction = null;
 let animating = false;
@@ -31,7 +30,8 @@ let serverOffset = 0;
 let lastClockReady = false;
 const requests = new Map();
 const clientPrefix = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-const effects = createEffects({ createCard: card => cardElement(card), getState: () => state, playerName: nameOf });
+const effects = createEffects({ createCard: card => cardElement(card), getState: () => state, playerName: nameOf,
+  playSound: event => sounds.playEvent(event) });
 
 // Storage can be unavailable in private/restricted browsers; the game still
 // works for this tab, but recovery then lasts only for this page lifetime.
@@ -44,6 +44,8 @@ function writeStorage(key, value) {
   memoryStorage.set(key, value);
   try { localStorage.setItem(key, value); } catch { /* session-only fallback */ }
 }
+
+const sounds = createSounds({ readStorage, writeStorage });
 
 function toast(message, error = false) {
   clearTimeout(toastTimer);
@@ -173,8 +175,6 @@ function receive({ type, payload }) {
 
 function commitSnapshot(next) {
   state = next;
-  const fingerprint = state?.game ? `${state.game.id}:${state.game.turnId}:${state.you.hand.map(c => c.id).join(',')}` : '';
-  if (fingerprint !== handFingerprint) { unoArmed = false; handFingerprint = fingerprint; }
   if (colorSelection && (!state?.game || state.game.paused ||
       state.game.id !== colorSelection.gameId || state.game.turnId !== colorSelection.turnId)) {
     $('colorDialog').close(); colorSelection = null;
@@ -189,7 +189,7 @@ function enqueueSnapshot(next) {
   if (!next?.game || !state?.game || next.game.id !== state.game.id || next.game.paused) {
     const previous = state;
     visualEpoch++;
-    effects.reset(); snapshotQueue = []; animating = false; freshCardIds.clear();
+    effects.reset(); sounds.reset(); snapshotQueue = []; animating = false; freshCardIds.clear();
     commitSnapshot(next); render(); effects.afterSnapshot(previous, next, []);
     return;
   }
@@ -214,6 +214,7 @@ async function drainSnapshots() {
         catch (error) { console.error('Animation skipped:', error); }
       }
       if (epoch !== visualEpoch) continue;
+      if (!skipAnimation) sounds.afterSnapshot(previous, next, events);
       const oldIds = new Set(previous.you.hand.map(card => card.id));
       freshCardIds = new Set(next.you.hand.filter(card => !oldIds.has(card.id)).map(card => card.id));
       animating = snapshotQueue.length > 0;
@@ -243,7 +244,7 @@ function cardElement(card, interactive = false, playable = false) {
     node.disabled = !ready || busy || animating || !playable;
     node.onclick = () => {
       if (card.kind === 'wild' || card.kind === 'wild4') openColors(card.id);
-      else gameCommand('PLAY_CARD', { cardId: card.id, declareUno: unoArmed });
+      else gameCommand('PLAY_CARD', { cardId: card.id });
     };
   }
   return node;
@@ -365,12 +366,8 @@ function renderGame(host, enabled) {
   $('initialColor').disabled = !actionEnabled;
   $('drawPile').disabled = !actionEnabled || !actions.canDraw;
   $('drawCard').disabled = !actionEnabled || !actions.canDraw;
-  const canArm = myTurn && !game.paused && game.phase === 'turn' && you.hand.length === 2;
-  $('callUno').disabled = !enabled || !(canArm || actions.canCallUno);
-  $('callUno').classList.toggle('armed', unoArmed);
-  $('callUno').textContent = unoArmed ? '已选 ✓' : game.unoDeclaredIds.includes(you.playerId) ? 'UNO ✓' : 'UNO!';
   $('handCount').textContent = you.hand.length;
-  $('handHint').textContent = you.isFinished ? `你已获得第 ${you.rank} 名，继续看看朋友们的对决吧！` : !ready ? '连接恢复后才能操作' : animating || !clockReady() ? '等牌落桌，慢慢来…' : unoArmed ? '下一张牌同时喊 UNO' : myTurn ? '点描边牌出牌 · 左右滑动看手牌' : '等你出牌 · 手牌可左右滑动';
+  $('handHint').textContent = you.isFinished ? `你已获得第 ${you.rank} 名，继续看看朋友们的对决吧！` : !ready ? '连接恢复后才能操作' : animating || !clockReady() ? '等牌落桌，慢慢来…' : myTurn ? '点描边牌出牌 · 剩一张自动喊 UNO' : '等待轮到你 · 剩一张自动喊 UNO';
   if (game.phase === 'finished') $('handHint').textContent = you.rank ? `本局第 ${you.rank} 名 · 下一局再战！` : '本局已结束';
   renderHand(you.hand, actions.playableCardIds, actionEnabled);
   updateClock();
@@ -512,10 +509,6 @@ $('acceptConfirm').onclick = () => { $('confirmDialog').close(); confirmAction?.
 $('cancelConfirm').onclick = () => { $('confirmDialog').close(); confirmAction = null; };
 $('returnLobby').onclick = () => execute('RETURN_TO_LOBBY');
 $('drawCard').onclick = $('drawPile').onclick = () => gameCommand('DRAW_CARD');
-$('callUno').onclick = () => {
-  if (state?.actions.canCallUno) gameCommand('CALL_UNO');
-  else { unoArmed = !unoArmed; render(); }
-};
 $('acceptWild4').onclick = () => gameCommand('ACCEPT_WILD4', { pendingId: state.game.pendingWild4.id });
 $('challengeWild4').onclick = () => gameCommand('CHALLENGE_WILD4', { pendingId: state.game.pendingWild4.id });
 $('initialColor').onclick = () => openColors();
@@ -524,7 +517,7 @@ for (const button of $('colorOptions').children) button.onclick = () => {
   const selection = colorSelection;
   $('colorDialog').close(); colorSelection = null;
   if (!selection || !state?.game || selection.gameId !== state.game.id || selection.turnId !== state.game.turnId) return;
-  if (selection.cardId) gameCommand('PLAY_CARD', { cardId: selection.cardId, chosenColor: button.dataset.color, declareUno: unoArmed });
+  if (selection.cardId) gameCommand('PLAY_CARD', { cardId: selection.cardId, chosenColor: button.dataset.color });
   else gameCommand('CHOOSE_INITIAL_COLOR', { color: button.dataset.color });
 };
 $('closeEvidence').onclick = () => $('evidenceDialog').close();

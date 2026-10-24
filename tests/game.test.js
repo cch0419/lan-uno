@@ -139,22 +139,35 @@ test('unplayable draw advances identically; passing is not a supported command',
   assert.equal(next.hands.A.length, 2);
 });
 
-test('UNO on play is atomic; omitted UNO has no penalty and catch is unsupported', () => {
+test('UNO is automatic and atomic with no declaration flag, including an explicit false flag', () => {
   const g = fixture({ A: ['red:1', 'blue:2'], B: ['blue:1'], C: ['green:1'] });
   const called = play(g, 0, { declareUno: true }).game;
   assert.deepEqual(called.unoDeclaredIds, ['A']);
   assert.equal(called.log.at(-1).kind, 'uno');
   const missed = play(g).game;
-  assert.deepEqual(missed.unoDeclaredIds, []);
+  assert.deepEqual(missed.unoDeclaredIds, ['A']);
+  assert.equal(missed.log.filter(event => event.kind === 'uno').length, 1);
+  assert.deepEqual(play(g, 0, { declareUno: false }).game.unoDeclaredIds, ['A']);
   assert.equal(missed.hands.A.length, 1);
   assert.equal('unoWindow' in missed, false);
   assert.throws(() => act(missed, 'CATCH_UNO'), { code: 'UNKNOWN_EVENT' });
   assert.equal(missed.hands.A.length, 1);
 });
 
-test('UNO can be announced once with one card; drawing resets the declaration', () => {
+test('all card kinds automatically emit UNO at one card, but finishing emits no UNO', () => {
+  for (const card of ['red:1', 'red:skip', 'red:reverse', 'red:draw2', 'wild', 'wild4']) {
+    const original = fixture({ A: [card, 'blue:2'], B: ['red:3', 'green:1'], C: ['blue:1', 'green:3'] });
+    const next = play(original, 0, { chosenColor: 'blue' }).game;
+    assert.deepEqual(next.unoDeclaredIds, ['A'], card);
+    assert.equal(next.log.filter(event => event.kind === 'uno').length, 1, card);
+  }
+  const finished = play(fixture({ A: ['red:1'], B: ['blue:2', 'green:1'], C: ['blue:1', 'green:3'] })).game;
+  assert.equal(finished.log.some(event => event.kind === 'uno'), false);
+});
+
+test('automatic UNO cannot be repeated manually; drawing resets the declaration', () => {
   const missed = play(fixture({ A: ['red:1', 'blue:2'], B: ['red:3', 'green:1'] })).game;
-  const declared = act(missed, 'CALL_UNO', {}, 'A').game;
+  const declared = missed;
   assert.deepEqual(declared.unoDeclaredIds, ['A']);
   assert.throws(() => act(declared, 'CALL_UNO', {}, 'A'), { code: 'UNO_ALREADY_CALLED' });
   assert.throws(() => act(declared, 'CALL_UNO', {}, 'B'), { code: 'INVALID_UNO' });
@@ -194,10 +207,12 @@ test('last +4 delays winner, acceptance draws four; stale response cannot run ag
   assert.throws(() => act(result, 'ACCEPT_WILD4', { pendingId: pending.pendingWild4.id }), { code: 'GAME_FINISHED' });
 });
 
-test('+4 evidence stays private and unchanged while actor announces UNO', () => {
+test('+4 automatically declares UNO and preserves private challenge evidence', () => {
   const original = fixture({ A: ['wild4', 'red:1'], B: ['blue:1'], C: ['green:1'] });
   const pending = play(original, 0, { chosenColor: 'blue' }).game;
-  const declared = act(pending, 'CALL_UNO', {}, 'A').game;
+  const declared = pending;
+  assert.deepEqual(declared.unoDeclaredIds, ['A']);
+  assert.equal(declared.log.filter(event => event.kind === 'uno').length, 1);
   assert.equal(declared.hands.A.length, 1);
   const result = act(declared, 'CHALLENGE_WILD4', { pendingId: declared.pendingWild4.id });
   assert.deepEqual(result.evidence.handBeforePlay, original.hands.A);

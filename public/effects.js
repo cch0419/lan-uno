@@ -1,7 +1,7 @@
 const colors = { red: '红色', yellow: '黄色', green: '绿色', blue: '蓝色' };
 
 /** Visual effects consume public events only; they never decide game state. */
-export function createEffects({ createCard, getState, playerName }) {
+export function createEffects({ createCard, getState, playerName, playSound = () => {} }) {
   const layer = document.getElementById('motionLayer');
   const reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
   const flights = new Set();
@@ -79,9 +79,14 @@ export function createEffects({ createCard, getState, playerName }) {
   }
 
   async function animateEvents(events, previous, next, isCurrent = () => true) {
-    if (document.hidden || reduced.matches) return;
+    if (document.hidden) return;
+    if (reduced.matches) {
+      for (const event of events) { if (!isCurrent()) return; playSound(event); }
+      return;
+    }
     for (const event of events) {
       if (!isCurrent()) return;
+      playSound(event);
       if (event.kind === 'played') {
         const own = event.playerId === previous.you.playerId;
         const cardNode = own ? [...document.querySelectorAll('#hand .playing-card')].find(node => node.dataset.cardId === event.card.id) : null;
@@ -141,6 +146,13 @@ export function createEffects({ createCard, getState, playerName }) {
 
   function afterSnapshot(previous, next, events) {
     if (!next?.game || document.hidden) return;
+    // Give automatic UNO priority over a still-visible turn prompt.
+    if (events.some(event => event.kind === 'uno')) {
+      clearTimeout(announcementTimer);
+      document.getElementById('announcement').hidden = true;
+      announcing = false;
+      announcementQueue = announcementQueue.filter(item => item.kind !== 'turn');
+    }
     for (const event of events) {
       if (event.kind === 'uno') announcementQueue.push({ kind: 'uno', title: 'UNO!', detail: `${playerName(event.playerId)} 只剩一张牌了！` });
       if (event.kind === 'player_finished') announcementQueue.push({ kind: 'finish', title: `第 ${event.rank} 名 · 完赛！`, detail: `${playerName(event.playerId)} 已出完手牌` });

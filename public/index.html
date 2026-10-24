@@ -13,7 +13,7 @@
   <div class="shell">
     <header class="site-header">
       <a href="#" class="brand" aria-label="UNO 局域网牌桌首页"><span class="brand-mark">U<span>·</span></span><span>UNO <small>局域网牌桌</small></span></a>
-      <div class="connection"><span id="connectionDot" class="status-dot"></span><span id="connectionText">准备入座</span><button id="reconnect" class="text-button" hidden>重新连接</button></div>
+      <div class="connection"><button id="toggleSound" class="text-button" aria-pressed="true">音效：开</button><span id="connectionDot" class="status-dot"></span><span id="connectionText">准备入座</span><button id="reconnect" class="text-button" hidden>重新连接</button></div>
     </header>
 
     <main>
@@ -93,7 +93,7 @@
             <aside class="panel activity"><p class="eyebrow">AT THE TABLE</p><h3>牌桌动态</h3><ol id="activityLog"></ol><div class="rule-reminder">彩色功能牌必须<strong>跟当前颜色</strong>。摸一张就结束回合，不用再点跳过。</div></aside>
           </div>
           <section id="handPanel" class="hand-panel panel">
-            <div class="hand-toolbar"><div><h2>你的手牌 <span id="handCount" class="count-badge"></span></h2><p id="handHint" class="field-hint"></p></div><div class="hand-actions"><button id="callUno" class="button uno-button">UNO!</button><button id="drawCard" class="button draw-button"><strong>＋ 摸一张</strong><small>摸完结束回合</small></button></div></div>
+            <div class="hand-toolbar"><div><h2>你的手牌 <span id="handCount" class="count-badge"></span></h2><p id="handHint" class="field-hint"></p></div><div class="hand-actions"><button id="drawCard" class="button draw-button"><strong>＋ 摸一张</strong><small>摸完结束回合</small></button></div></div>
             <div id="hand" class="hand" aria-label="你的手牌，左右滑动查看"></div>
           </section>
           <section id="spectatorPanel" class="hand-panel panel" hidden><h2>你正在旁观牌桌</h2><p class="field-hint">你不参与本局，不会收到手牌。房主仍可管理房间，并在结算后返回大厅。电脑上的 Node 服务需要保持运行。</p></section>
@@ -111,6 +111,6 @@
   <dialog id="colorDialog"><div class="dialog-body"><p class="eyebrow">CHOOSE A COLOR</p><h2>接下来，什么颜色？</h2><p>选好颜色后提交这张变色牌。</p><div id="colorOptions" class="color-options"><button data-color="red" class="color-choice red">红色</button><button data-color="yellow" class="color-choice yellow">黄色</button><button data-color="green" class="color-choice green">绿色</button><button data-color="blue" class="color-choice blue">蓝色</button></div><button id="cancelColor" class="text-button">取消</button></div></dialog>
   <dialog id="confirmDialog"><div class="dialog-body"><h2 id="confirmTitle"></h2><p id="confirmText"></p><div class="dialog-actions"><button id="cancelConfirm" class="button light">取消</button><button id="acceptConfirm" class="button primary">确认</button></div></div></dialog>
   <dialog id="evidenceDialog"><div class="dialog-body"><p class="eyebrow">WILD +4 CHALLENGE</p><h2 id="evidenceTitle"></h2><p id="evidenceText"></p><div id="evidenceCards" class="evidence-cards"></div><p class="field-hint">这是出牌前的手牌快照，仅向你展示。</p><button id="closeEvidence" class="button primary">知道了</button></div></dialog>
-  <dialog id="rulesDialog"><div class="dialog-body rules"><p class="eyebrow">HOUSE RULES</p><h2>这一桌，这样玩。</h2><ol><li>每人 7 张。数字牌按相同颜色或相同数字接牌；彩色功能牌只按当前颜色接牌，不按相同功能跨色接牌。</li><li>只有黑色变色牌和 +4 可以跨颜色使用。变色后，所有人跟所选的颜色。</li><li>轮到你时，可以出一张牌，或摸一张。摸牌后立刻结束回合，即使新牌能出，也必须等下次；没有跳过或弃牌按钮。</li><li>跳过让下家停一轮；反转改变方向。双人时，两种牌都让自己再行动。</li><li>+2 让下家抽 2 张并跳过。不能叠加 +2 或 +4。</li><li>+4 只有在没有当前颜色的手牌时合法，但你可以冒险使用。质疑成功，出牌者抽 4；失败，质疑者抽 6 并跳过。</li><li>剩两张时可先点 UNO 再出牌；只剩一张时也可直接喊 UNO。有明显动画提示，没有抓漏及漏喊罚牌。</li><li>按出完手牌顺序记录名次，已完赛的人不再轮转；只剩一人时全局结束。最后一张为罚牌时先结算。不累计积分。</li><li>默认每回合 45 秒，房主可在大厅调整。超时自动摸一张并结束回合；回应 +4 超时视为接受罚牌。</li></ol><p class="small-rule">圆桌以自己的位置为底部，上下箭头显示轮转方向，发光座位表示当前行动者。未完赛玩家掉线暂停计时，保留 60 秒，超时或退出中止本局；只管理的房主不占座位。</p><button id="closeRules" class="button primary">明白了</button></div></dialog>
+  <dialog id="rulesDialog"><div class="dialog-body rules"><p class="eyebrow">HOUSE RULES</p><h2>这一桌，这样玩。</h2><ol><li>每人 7 张。数字牌按相同颜色或相同数字接牌；彩色功能牌只按当前颜色接牌，不按相同功能跨色接牌。</li><li>只有黑色变色牌和 +4 可以跨颜色使用。变色后，所有人跟所选的颜色。</li><li>轮到你时，可以出一张牌，或摸一张。摸牌后立刻结束回合，即使新牌能出，也必须等下次；没有跳过或弃牌按钮。</li><li>跳过让下家停一轮；反转改变方向。双人时，两种牌都让自己再行动。</li><li>+2 让下家抽 2 张并跳过。不能叠加 +2 或 +4。</li><li>+4 只有在没有当前颜色的手牌时合法，但你可以冒险使用。质疑成功，出牌者抽 4；失败，质疑者抽 6 并跳过。</li><li>出牌后只剩一张牌时，系统自动喊 UNO，同时播放语音和显示动画，无需点击按钮。没有抓漏及漏喊罚牌。</li><li>按出完手牌顺序记录名次，已完赛的人不再轮转；只剩一人时全局结束。最后一张为罚牌时先结算。不累计积分。</li><li>默认每回合 45 秒，房主可在大厅调整。超时自动摸一张并结束回合；回应 +4 超时视为接受罚牌。</li></ol><p class="small-rule">圆桌以自己的位置为底部，上下箭头显示轮转方向，发光座位表示当前行动者。未完赛玩家掉线暂停计时，保留 60 秒，超时或退出中止本局；只管理的房主不占座位。</p><button id="closeRules" class="button primary">明白了</button></div></dialog>
 </body>
 </html>
