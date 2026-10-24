@@ -2,3 +2,8 @@ node_modules/
 .npm-cache/
 *.log
 .DS_Store
+tools/cloudflared
+tools/cloudflared*.exe
+.env
+.env.*
+!.env.example

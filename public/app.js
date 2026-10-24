@@ -1,5 +1,6 @@
 import { layoutSeats } from './table-layout.js';
 import { createEffects } from './effects.js';
+import { websocketUrl, invitation } from './network-client.js';
 
 const $ = id => document.getElementById(id);
 const colorNames = { red: '红色', yellow: '黄色', green: '绿色', blue: '蓝色' };
@@ -29,6 +30,7 @@ let visualEpoch = 0;
 let freshCardIds = new Set();
 let serverOffset = 0;
 let lastClockReady = false;
+let networkConfig = null;
 const requests = new Map();
 const clientPrefix = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 const effects = createEffects({ createCard: card => cardElement(card), getState: () => state, playerName: nameOf });
@@ -75,7 +77,7 @@ function connect() {
   shouldReconnect = true;
   status('正在连接牌桌…');
   connectPromise = new Promise((resolve, reject) => { connectResolve = resolve; connectReject = reject; });
-  const thisSocket = new WebSocket(`${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ws`);
+  const thisSocket = new WebSocket(websocketUrl(location.origin));
   socket = thisSocket;
   handshakeTimer = setTimeout(() => { thisSocket.close(); }, 10_000);
   thisSocket.onopen = () => {
@@ -261,6 +263,7 @@ function showConfirm(title, text, callback) {
 }
 
 function render() {
+  renderSharing();
   document.body.classList.toggle('in-game', !!state?.game);
   $('home').hidden = !!state;
   $('room').hidden = !state;
@@ -317,10 +320,33 @@ function renderLobby(host, enabled) {
   const everyoneOnline = participants.every(player => player.online);
   $('startGame').disabled = !enabled || !everyoneOnline || participants.length < 2;
   $('startHint').textContent = !host ? '等房主开始，准备好你的好运气。' : participants.length < 2 ? `还需 ${2 - participants.length} 名玩家；仅管理的房主不计入开局人数。` : !everyoneOnline ? '请等待离线玩家恢复连接。' : '玩家已到齐，现在就可以开始。';
-  $('shareAddress').value = location.origin;
-  $('localhostHint').textContent = ['localhost', '127.0.0.1'].includes(location.hostname)
-    ? '你正在使用本机地址。其他设备请使用启动终端显示的“局域网”网址。'
-    : '可长按或选中地址复制。朋友需要与你处于可互通的局域网。';
+  renderSharing();
+}
+
+function renderSharing() {
+  const share = invitation(networkConfig, location.origin);
+  $('shareAddress').value = share.address;
+  $('copyInvite').disabled = !share.canCopy;
+  $('localhostHint').textContent = share.hint;
+  const internet = networkConfig?.mode === 'internet';
+  $('homeEyebrow').textContent = internet ? 'DIFFERENT NETWORKS. SAME TABLE.' : 'SAME WI-FI. SAME TABLE.';
+  $('introCopy').textContent = internet ? '不用下载，不用注册。朋友打开邀请网址，不同网络也能一起玩。' : '不用下载，不用注册。连上同一个网络，把朋友叫到牌桌边。';
+  $('shareLabel').textContent = internet ? '公网邀请网址' : '当前网页地址';
+  $('networkNotice').hidden = !internet || !!state?.game;
+  $('networkNotice').textContent = internet ? `${networkConfig.tunnelStatus === 'starting' ? '公网入口连接中' : ['stopped', 'failed'].includes(networkConfig.tunnelStatus) ? '公网入口已停止' : '公网模式'} · ${share.hint}` : '';
+}
+
+async function refreshNetworkConfig() {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5000);
+  try {
+    const response = await fetch('/api/config', { signal: controller.signal, cache: 'no-store' });
+    if (response.ok) { networkConfig = await response.json(); renderSharing(); }
+  } catch { /* The WebSocket connection already reports temporary outages. */ }
+  finally {
+    clearTimeout(timeout);
+    setTimeout(refreshNetworkConfig, networkConfig?.tunnelStatus === 'starting' ? 2000 : 10_000);
+  }
 }
 
 function renderGame(host, enabled) {
@@ -530,6 +556,19 @@ for (const button of $('colorOptions').children) button.onclick = () => {
 $('closeEvidence').onclick = () => $('evidenceDialog').close();
 $('showRules').onclick = () => $('rulesDialog').showModal();
 $('closeRules').onclick = () => $('rulesDialog').close();
+$('copyInvite').onclick = async () => {
+  const address = $('shareAddress').value;
+  if (!address) return;
+  try {
+    if (!navigator.clipboard?.writeText) throw new Error('Clipboard unavailable');
+    await navigator.clipboard.writeText(`${address}\n房间号：${state.roomCode}`);
+    toast('邀请网址和房间号已复制，发给朋友即可');
+  } catch {
+    $('shareAddress').focus(); $('shareAddress').select();
+    toast('请长按或按 Ctrl+C 复制选中的网址，并告诉朋友房间号');
+  }
+};
 $('reconnect').onclick = () => { attempt = 0; connect().catch(error => toast(error.message, true)); };
 render();
+refreshNetworkConfig();
 if (readStorage('uno.token') && $('nickname').value) connect().catch(() => {});

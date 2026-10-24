@@ -9,6 +9,7 @@
   },
   "scripts": {
     "start": "node server/index.js",
+    "start:internet": "node scripts/start-internet.mjs",
     "dev": "node --watch server/index.js",
     "test": "node --test"
   },

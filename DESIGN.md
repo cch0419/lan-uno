@@ -1,8 +1,99 @@
 # 局域网 Web UNO：完整设计方案与开发计划
 
-版本：1.0 · 2026-10-23
+版本：1.1 · 2026-10-24
 
 目标：一台电脑启动服务，同局域网其他设备通过浏览器访问主机 IP 和端口，输入昵称、创建或加入房间，完成 UNO 对战。运行期间不依赖公网、账号系统或数据库。
+
+新增跨网目标：仍用自己的电脑作为唯一游戏服务器，通过公网隧道让其他 WiFi／移动数据上的玩家加入。局域网模式保留；跨网模式需要第三方隧道中转，不部署云端游戏服务。
+
+## 跨网络联机补充设计：自己的电脑作为服务器
+
+本节优先于原始章节中“仅局域网”的约束。原先独立的跨网方案已合并到本文；本次不实施云部署、P2P、数据库或多实例。
+
+### 架构与使用方式
+
+```text
+朋友浏览器（不同 WiFi / 移动数据）
+       │ HTTPS 网页 + WSS 游戏消息
+       ▼
+Cloudflare Quick Tunnel 临时公网入口
+       │ 电脑主动建立的出站隧道
+       ▼
+本机 cloudflared → http://127.0.0.1:3000
+       ▼
+原 Node.js 单进程：HTTP + WebSocket + 内存房间 + 规则裁判
+
+电脑房主浏览器 → http://localhost:3000（自动打开，仍可选择仅管理）
+局域网玩家     → http://主机内网IP:3000（保持可用）
+```
+
+所有实际玩家优先统一使用同一个公网网址。localhost、内网 IP、公网域名分别存储浏览器身份；主机本地管理身份和自己手机参赛身份可以独立。电脑需要保持开机、唤醒、联网，公网启动窗口也需保持运行。Node 进程停止后所有内存房间清空。
+
+Cloudflare Quick Tunnel 不要求自有域名或账号，生成的临时域名每次启动可能变化，仅用于试玩，不保证持续可用。朋友只使用浏览器；只有服务器电脑安装 cloudflared。不同运营商的可达性、延迟必须用真实手机移动数据和朋友网络验收。
+
+### 必须实现：网络配置、校验与邀请
+
+- 普通启动 `npm start` / `start.bat` 继续使用原局域网模式。
+- 公网启动 `npm run start:internet` / `start-internet.bat` 同时运行游戏服务和自己创建的 cloudflared 子进程。
+- `UNO_PUBLIC_URL` 可供已有手动隧道使用，必须是纯 HTTPS Origin，不允许路径、凭据、查询、片段或通配符；自动 Quick Tunnel 模式会忽略旧的该变量。
+- 继续兼容 `UNO_ALLOWED_HOSTS` 精确主机名列表。HTTP 和 WS 握手都验证 Host；公网 WebSocket Origin 必须精确匹配配置的 HTTPS Origin。禁止用未验证的 X-Forwarded-Host、X-Forwarded-Proto 放宽校验。
+- 如果本机隧道重写 Host，仅允许 TCP 来源为 loopback、目标为 localhost／loopback Host 且 Origin 精确等于已配置公网 Origin 的情况。
+- `GET /api/config` 返回 `{mode, publicUrl, tunnelStatus}`，仅含公开邀请信息，响应禁用缓存。不包含令牌、服务器环境变量、私人地址列表或手牌。
+- `mode` 为 `lan/internet`；`tunnelStatus` 为 `off/starting/ready/configured/failed/stopped`。`configured` 表示手动地址配置，不代表已检测隧道可达。
+- 大厅优先展示公网网址，支持复制“网址 + 四位房间号”。连接中和子进程停止时不提供可复制的旧链接。本机地址不可作为局域网邀请复制。
+- 前端继续按网页协议使用 WS/WSS。电脑 HTTP 管理页无须切到公网域名，公网地址通过配置接口更新。
+- 公网运行提示明确说明“电脑与公网窗口需保持运行”，不改变已有玩法和倒计时规则。
+
+### 必须实现：启动与退出生命周期
+
+```text
+校验 PORT
+  → 查找 CLOUDFLARED_PATH / tools/cloudflared.exe / PATH
+  → --version 检查可运行；缺失则显示官方安装说明，不静默安装
+  → 启动 Node HTTP/WS；端口被占用则失败，不操作已有进程
+  → 启动自己拥有的 cloudflared 子进程（隐藏辅助窗口，禁止 shell 拼接）
+  → 自动打开 localhost 管理页
+  → 从分块日志中提取严格匹配的 https://*.trycloudflare.com 地址
+  → 检测 Registered tunnel connection 后发布链接
+  → 动态更新白名单与公开配置，不重启 Node、不清空房间
+```
+
+日志可能分多段到达，必须按行缓冲。只接受工具生成的确切域名，不能匹配任意网页 URL；公网工具只从官方来源取得。临时运行配置保存在内存，地址不写死到应用源代码或持久化配置。测试截图中的一次性示例网址不作为有效入口。
+
+cloudflared 异常退出时将公网入口标记为 failed，清除界面可分享状态，Node 和局域网对局继续运行。工具本身处理连接重试；短时上游故障不承诺立即被界面识别，由现有 WebSocket 心跳和重连反馈实际状态。60 秒仍未建连时给出诊断提示。
+
+Ctrl+C／正常终止只关闭本启动器创建的隧道和 UNO 服务，清理计时器与连接。不通过进程名批量终止 Node/cloudflared，不改防火墙、路由器或用户已有隧道配置。
+
+### 依赖、操作与风险
+
+从 [Cloudflare 官方下载页](https://developers.cloudflare.com/tunnel/downloads/) 取得适合本机的 cloudflared。Windows 可将官方可执行文件命名为 `tools/cloudflared.exe`，也可使用 PATH 或 `CLOUDFLARED_PATH`。可执行文件、缓存和私人环境文件均不提交。
+
+手动隧道仍可使用：先取得 HTTPS 网址，设置 `$env:UNO_PUBLIC_URL = 'https://实际域名'`，再 `npm start`；需自行保持隧道运行。自动入口直接使用 `npm run start:internet`。
+
+| 风险 | 处理 |
+| --- | --- |
+| 临时网址变化 | 重启后重新分享；新域名身份独立，需要重新进房 |
+| 运营商或网络阻断 Cloudflare | 在不同网络实测；失败保留局域网运行，后续可适配其他支持 HTTP/WS 的隧道 |
+| 页面能开但不能出牌 | 检查 WSS、Host/Origin、`/ws` Upgrade 转发和连接日志 |
+| 电脑休眠／断网／服务退出 | 公网游戏不可用；保持电脑和窗口运行 |
+| Node 重启 | 房间丢失，必须重新建房；不承诺恢复原局 |
+| cloudflared 本地配置影响 Quick Tunnel | 提示检查 `.cloudflared` 配置，不擅自覆盖或删除 |
+| 网址被转发给陌生人 | 有网址的人能访问；四位房间号仅定位房间，长期使用可选加入场口令 |
+
+Quick Tunnel 官方限制包括无可用性保证、临时域名、最多 200 个进行中的请求和不支持 SSE；本项目使用 WebSocket，仍须实测隧道完整链路。
+
+### 过程计划与验收
+
+1. 在 `codex/internet-multiplayer` 实现配置策略与公网 HTTP/WS 握手测试。
+2. 实现隧道启动、日志解析、动态网址和退出清理；用受控模拟进程验证失败路径。
+3. 完成大厅邀请与复制、启动说明，回归手机和局域网模式。
+4. 原有规则／联机测试与新增公网配置、Origin、防伪造请求头、域名轮换、隧道生命周期测试通过。
+5. 真实跨网验收：至少两台设备使用不同网络完成一局，检查出牌、摸牌、选色、+4、UNO、超时、名次、短时掉线和私人手牌隔离。
+6. 记录验证证据与限制，用户确认后再合并 main。测试通过不代表可以证明完全无缺陷。
+
+可选扩展：固定隧道域名、入口口令、延迟指标、二维码；这些都继续让用户电脑作为游戏服务器，不列入本次必须范围。
+
+官方参考：[Quick Tunnels](https://developers.cloudflare.com/tunnel/get-started/quick-tunnels/)、[隧道 Origin 参数](https://developers.cloudflare.com/tunnel/reference/origin-parameters/)、[WebSocket 支持](https://developers.cloudflare.com/network/websockets/)。
 
 ## 最新玩法与界面修订（优先于原始标准规则方案）
 
