@@ -17,11 +17,12 @@
     </header>
 
     <main>
+      <div id="networkNotice" class="pause-banner" role="status" hidden></div>
       <section id="home" class="home-grid">
         <div class="intro">
-          <p class="eyebrow">SAME WI-FI. SAME TABLE.</p>
+          <p id="homeEyebrow" class="eyebrow">SAME WI-FI. SAME TABLE.</p>
           <h1>人到齐，<br>就开一局<span class="accent">。</span></h1>
-          <p class="intro-copy">不用下载，不用注册。<br>连上同一个网络，把朋友叫到牌桌边。</p>
+          <p id="introCopy" class="intro-copy">不用下载，不用注册。<br>连上同一个网络，把朋友叫到牌桌边。</p>
           <div class="hero-cards" aria-hidden="true">
             <div class="hero-card red"><span>7</span><b>7</b></div>
             <div class="hero-card yellow"><span>↻</span><b>↻</b></div>
@@ -43,7 +44,7 @@
           <div class="divider"><span>或者，朋友已经在等你</span></div>
           <label for="joinCode">4 位房间号</label>
           <div class="inline-field"><input id="joinCode" class="code-input" inputmode="numeric" maxlength="4" autocomplete="off" placeholder="0000"><button id="joinRoom" class="button secondary">加入房间</button></div>
-          <p class="privacy-note">● 网页和游戏状态由这台局域网主机提供</p>
+          <p class="privacy-note">● 网页和游戏状态由服务器电脑提供</p>
         </div>
       </section>
 
@@ -62,7 +63,7 @@
             <button id="startGame" class="button primary full">开始游戏 <span>→</span></button>
             <p id="startHint" class="field-hint centered"></p>
           </div>
-          <aside class="panel invitation"><span class="step-label">02 / 邀请朋友</span><h2>把房间号告诉他们。</h2><p>朋友先打开与你相同的主机网址，<br>再输入上方的 4 位房间号。</p><label for="shareAddress">当前网页地址</label><input id="shareAddress" readonly><p id="localhostHint" class="field-hint"></p><div class="small-rule">准备好就开始。游戏中暂不接受新玩家加入，刷新页面可以恢复原来的座位。</div></aside>
+          <aside class="panel invitation"><span class="step-label">02 / 邀请朋友</span><h2>把朋友叫到牌桌边。</h2><p>把邀请网址和房间号一起发给朋友。</p><label id="shareLabel" for="shareAddress">当前网页地址</label><input id="shareAddress" readonly><button id="copyInvite" class="button secondary full">复制邀请网址和房间号</button><p id="localhostHint" class="field-hint"></p><div class="small-rule">准备好就开始。游戏中暂不接受新玩家加入，刷新页面可以恢复原来的座位。</div></aside>
         </section>
 
         <section id="game" hidden>

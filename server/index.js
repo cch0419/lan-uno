@@ -5,6 +5,7 @@ import { pathToFileURL } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { RoomManager, send } from './rooms.js';
 import { openBrowser } from './open-browser.js';
+import { createNetworkPolicy } from './network.js';
 
 export function localAddresses() {
   return Object.values(networkInterfaces()).flat().filter(item =>
@@ -14,6 +15,9 @@ export function localAddresses() {
 
 export async function createServer(options = {}) {
   const manager = new RoomManager(options);
+  const network = createNetworkPolicy({ localHosts: ['localhost', '127.0.0.1', '[::1]', hostname(), ...localAddresses()],
+    publicUrl: options.publicUrl ?? process.env.UNO_PUBLIC_URL ?? '',
+    extraHosts: options.extraHosts ?? process.env.UNO_ALLOWED_HOSTS ?? '', tunnelStatus: options.tunnelStatus });
   const files = new Map();
   for (const [route, file, mime] of [
     ['/', 'index.html', 'text/html; charset=utf-8'],
@@ -21,21 +25,22 @@ export async function createServer(options = {}) {
     ['/styles.css', 'styles.css', 'text/css; charset=utf-8'],
     ['/game.css', 'game.css', 'text/css; charset=utf-8'],
     ['/table-layout.js', 'table-layout.js', 'text/javascript; charset=utf-8'],
-    ['/effects.js', 'effects.js', 'text/javascript; charset=utf-8']
+    ['/effects.js', 'effects.js', 'text/javascript; charset=utf-8'],
+    ['/network-client.js', 'network-client.js', 'text/javascript; charset=utf-8']
   ]) {
     files.set(route, { body: await readFile(new URL(`../public/${file}`, import.meta.url)), mime });
   }
-  const allowedHosts = new Set(['localhost', '127.0.0.1', '[::1]', hostname().toLowerCase(),
-    ...localAddresses(), ...(process.env.UNO_ALLOWED_HOSTS ?? '').split(',').filter(Boolean)]);
-  const validHost = request => {
-    try { return allowedHosts.has(new URL(`http://${request.headers.host}`).hostname.toLowerCase()); }
-    catch { return false; }
-  };
   const server = http.createServer((request, response) => {
-    if (!validHost(request)) { response.writeHead(403); response.end('Host not allowed'); return; }
+    if (!network.validHost(request)) { response.writeHead(403); response.end('Host not allowed'); return; }
     let path;
     try { path = new URL(request.url, 'http://localhost').pathname; }
     catch { response.writeHead(400); response.end(); return; }
+    if (path === '/api/config' && ['GET', 'HEAD'].includes(request.method)) {
+      response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store',
+        'X-Content-Type-Options': 'nosniff' });
+      response.end(request.method === 'HEAD' ? undefined : JSON.stringify(network.clientConfig()));
+      return;
+    }
     const file = files.get(path);
     if (!file || !['GET', 'HEAD'].includes(request.method)) {
       response.writeHead(404); response.end('Not found'); return;
@@ -49,14 +54,7 @@ export async function createServer(options = {}) {
   });
   const wss = new WebSocketServer({ noServer: true, maxPayload: 8192, perMessageDeflate: false });
   server.on('upgrade', (request, socket, head) => {
-    let validOrigin = !request.headers.origin;
-    try {
-      if (request.headers.origin) {
-        const origin = new URL(request.headers.origin);
-        validOrigin = ['http:', 'https:'].includes(origin.protocol) && origin.host === request.headers.host;
-      }
-    } catch { validOrigin = false; }
-    if (!validHost(request) || !validOrigin || request.url !== '/ws' || wss.clients.size >= 200) {
+    if (!network.validOrigin(request) || request.url !== '/ws' || wss.clients.size >= 200) {
       socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n'); return;
     }
     wss.handleUpgrade(request, socket, head, ws => wss.emit('connection', ws));
@@ -95,7 +93,7 @@ export async function createServer(options = {}) {
   }, 15_000);
   cleanup.unref(); heartbeat.unref();
   return {
-    server, manager, wss,
+    server, manager, wss, network,
     async close() {
       clearInterval(cleanup); clearInterval(heartbeat);
       for (const socket of wss.clients) socket.terminate();
@@ -120,7 +118,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     const managementUrl = `http://localhost:${port}/`;
     console.log(`\nUNO · 局域网牌桌\n本机管理：${managementUrl}`);
     for (const address of localAddresses()) console.log(`局域网：http://${address}:${port}`);
-    console.log('同局域网朋友打开以上地址即可。Ctrl+C 停止服务。\n');
+    const publicUrl = app.network.clientConfig().publicUrl;
+    if (publicUrl) console.log(`公网邀请：${publicUrl}\n请同时保持你的隧道程序运行。`);
+    console.log('局域网仍可使用以上地址。Ctrl+C 停止服务。\n');
     // Open only after listening succeeds; tests and unattended deployments can
     // opt out. A missing default browser must never stop the game service.
     if (process.env.UNO_OPEN_BROWSER !== '0' && !process.argv.includes('--no-open')) {
