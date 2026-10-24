@@ -1,4 +1,5 @@
 import { randomBytes, randomInt, randomUUID } from 'node:crypto';
+import { VoiceHub } from './voice.js';
 import { createGame, applyCommand, applyTurnTimeout, activePlayers, gameView, RuleError, requireRule } from './game.js';
 
 const GAME_COMMANDS = new Set(['CHOOSE_INITIAL_COLOR', 'PLAY_CARD', 'DRAW_CARD',
@@ -20,6 +21,7 @@ export class RoomManager {
     this.sessionTtl = sessionTtl;
     this.actionDelayMs = actionDelayMs;
     this.now = now;
+    this.voice = new VoiceHub({ send, roomFor: player => this.roomFor(player), getPlayer: id => this.players.get(id) });
   }
 
   roomFor(player) {
@@ -88,6 +90,7 @@ export class RoomManager {
       this.players.set(player.id, player);
     }
     const previousSocket = player.socket;
+    this.voice.leave(player.id);
     player.socket = socket;
     player.online = true;
     player.disconnectedAt = null;
@@ -190,6 +193,7 @@ export class RoomManager {
 
   leave(player, reason = 'left') {
     const room = this.roomFor(player);
+    this.voice.leave(player.id);
     const wasPlaying = room.game?.seatOrder.includes(player.id) && !room.game.finishOrder.includes(player.id);
     room.playerIds = room.playerIds.filter(id => id !== player.id);
     room.spectatorIds = room.spectatorIds.filter(id => id !== player.id);
@@ -251,6 +255,7 @@ export class RoomManager {
       case 'ROOM_CLOSE': {
         const closing = this.hostRoom(player);
         for (const id of closing.playerIds) {
+          this.voice.leave(id);
           const member = this.players.get(id);
           member.roomCode = null;
           send(member.socket, 'ROOM_CLOSED', { reason: 'host_closed' });
@@ -312,6 +317,11 @@ export class RoomManager {
       }
       player = this.players.get(socket.playerId);
       requireRule(player?.socket === socket, 'SESSION_REQUIRED', '请先连接，或此窗口已被其他窗口接管');
+      if (message.type.startsWith('VOICE_')) {
+        this.voice.handle(player, message.type, message.payload);
+        send(socket, 'COMMAND_RESULT', { requestId: message.requestId, ok: true });
+        return;
+      }
       signature = JSON.stringify([message.type, message.payload]);
       const cached = player.requests.get(message.requestId);
       if (cached) {
@@ -347,6 +357,7 @@ export class RoomManager {
   disconnect(socket, now = this.now()) {
     const player = this.players.get(socket.playerId);
     if (!player || player.socket !== socket) return;
+    this.voice.leave(player.id);
     player.socket = null; player.online = false; player.disconnectedAt = now;
     if (!player.roomCode) return;
     const room = this.roomFor(player);

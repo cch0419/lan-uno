@@ -140,7 +140,7 @@ docker compose logs --tail=100 uno
 
 http://39.104.71.170:3000
 
-使用 http，不是 https。能看到游戏首页后，输入昵称、创建房间。
+以上地址使用 http，能看到游戏首页后，输入昵称、创建房间。此 HTTP 部署方式仅能玩牌，手机麦克风需要可信的 HTTPS。启用语音前请按 README 的“房间语音聊天”配置 HTTPS（直接配置证书或使用 HTTPS 反向代理），反向代理必须转发 WebSocket；公网语音在无法直连时还需要配置 STUN/TURN。
 
 ### 3. 公网对局检查
 

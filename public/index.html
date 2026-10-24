@@ -50,6 +50,11 @@
       <section id="room" hidden>
         <div class="room-header"><div><p class="eyebrow">YOUR TABLE</p><h1>房间 <span id="roomCode"></span><span id="roomStatus" class="pill">等待入座</span></h1></div><div class="room-controls"><button id="leaveRoom" class="button light">退出房间</button><button id="closeRoom" class="text-button danger" hidden>解散</button></div></div>
         <div id="pauseBanner" class="pause-banner" hidden></div>
+        <section class="voice-bar" aria-label="房间语音聊天">
+          <div class="voice-controls"><button id="voiceMic" class="voice-button" aria-pressed="false" disabled>🎙 开启麦克风</button><button id="voiceListen" class="voice-button" aria-pressed="false" disabled>🔇 开启听筒</button><button id="voiceResume" class="text-button" hidden>恢复收听</button></div>
+          <p id="voiceStatus" class="voice-status" role="status">语音未开启</p>
+          <div id="voicePeople" class="voice-people" aria-label="语音伙伴"></div>
+        </section>
 
         <section id="lobby" class="lobby-grid">
           <div class="panel lobby-panel">
@@ -107,6 +112,7 @@
   </div>
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
   <div id="motionLayer" class="motion-layer" aria-hidden="true"></div>
+  <div id="voiceAudio" hidden></div>
   <div id="announcement" class="announcement" role="status" aria-live="assertive" hidden><strong id="announcementTitle"></strong><span id="announcementDetail"></span></div>
 
   <dialog id="colorDialog"><div class="dialog-body"><p class="eyebrow">CHOOSE A COLOR</p><h2>接下来，什么颜色？</h2><p>选好颜色后提交这张变色牌。</p><div id="colorOptions" class="color-options"><button data-color="red" class="color-choice red">红色</button><button data-color="yellow" class="color-choice yellow">黄色</button><button data-color="green" class="color-choice green">绿色</button><button data-color="blue" class="color-choice blue">蓝色</button></div><button id="cancelColor" class="text-button">取消</button></div></dialog>

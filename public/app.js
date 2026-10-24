@@ -2,6 +2,7 @@ import { layoutSeats } from './table-layout.js';
 import { createEffects } from './effects.js';
 import { createSounds } from './sounds.js';
 import { layoutHand } from './hand-layout.js';
+import { createVoice } from './voice.js';
 
 const $ = id => document.getElementById(id);
 const colorNames = { red: '红色', yellow: '黄色', green: '绿色', blue: '蓝色' };
@@ -47,6 +48,7 @@ function writeStorage(key, value) {
 }
 
 const sounds = createSounds({ readStorage, writeStorage });
+const voice = createVoice({ send: request, notify: toast });
 
 function toast(message, error = false) {
   clearTimeout(toastTimer);
@@ -94,6 +96,7 @@ function connect() {
     if (socket !== thisSocket) return;
     clearTimeout(handshakeTimer);
     ready = false;
+    voice.disconnect();
     connectReject?.(new Error('连接失败，请确认主机服务正在运行'));
     connectPromise = null; connectResolve = null; connectReject = null;
     for (const entry of requests.values()) { clearTimeout(entry.timer); entry.reject(new Error('连接已断开，恢复后将同步最新状态')); }
@@ -147,6 +150,7 @@ function receive({ type, payload }) {
     if (payload.previousSessionExpired) toast('之前的会话已失效，已建立新身份。服务重启后需要重新建房。');
     render();
   } else if (type === 'STATE') {
+    voice.setRoom(payload);
     if (payload?.serverTime) serverOffset = payload.serverTime - Date.now();
     enqueueSnapshot(payload);
   } else if (type === 'COMMAND_RESULT') {
@@ -161,11 +165,15 @@ function receive({ type, payload }) {
       socket.close();
     }
   } else if (type === 'ROOM_CLOSED') {
+    voice.disconnect();
     enqueueSnapshot(null);
     toast('房间已解散'); render();
   } else if (type === 'SESSION_REPLACED') {
+    voice.disconnect();
     shouldReconnect = false; ready = false;
     toast('你已在另一个标签页入座。此窗口停止连接。'); render();
+  } else if (type === 'VOICE_ROSTER' || type === 'VOICE_SIGNAL') {
+    voice.receive(type, payload);
   } else if (type === 'CHALLENGE_EVIDENCE') {
     $('evidenceTitle').textContent = payload.wasLegal ? '质疑失败' : '质疑成功';
     $('evidenceText').textContent = `${nameOf(payload.actorId)} 出牌前的生效颜色是${colorNames[payload.previousColor]}。${payload.wasLegal ? '手中没有该颜色的牌，你罚抽 6 张并跳过。' : '手中有该颜色的牌，对方罚抽 4 张，继续你的回合。'}`;

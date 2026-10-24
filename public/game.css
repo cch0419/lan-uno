@@ -267,6 +267,24 @@ body.in-game .room-header .eyebrow { display: none; }
   transform: translateY(-13px) scale(.98);
 }
 .hand-scroll-hint { margin: 0 0 3px; text-align: center; color: var(--muted); font-size: 10px; letter-spacing: 1px; }
+.voice-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; margin: 8px 0 14px; padding: 10px 13px; border: 1px solid #dce4d5; border-radius: 12px; background: #fffef9; }
+.voice-controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.voice-button { min-height: 40px; padding: 8px 12px; border: 1px solid #d6dfce; border-radius: 8px; background: #f3f5ee; color: var(--ink); font: inherit; font-size: 12px; cursor: pointer; }
+.voice-button[aria-pressed="true"] { background: #175c4a; color: #fff9e4; border-color: #175c4a; }
+.voice-button:disabled { opacity: .5; cursor: default; }
+.voice-button:focus-visible { outline: 3px solid #d5a338; outline-offset: 3px; }
+.voice-status { margin: 0; font-size: 11px; color: var(--muted); flex: 1 1 210px; }
+.voice-people { display: flex; flex-wrap: wrap; gap: 6px; }
+.voice-people:empty { display: none; }
+.voice-person { font-size: 10px; padding: 4px 8px; border-radius: 20px; background: #edf2e7; overflow-wrap: anywhere; }
+@media (max-width: 720px) {
+  .voice-bar { margin: 6px 0 9px; padding: 8px 10px; gap: 6px; }
+  .voice-status { font-size: 10px; flex-basis: 100%; }
+  .voice-button { min-height: 40px; font-size: 11px; padding: 7px 11px; }
+}
+@media (max-width: 720px) and (max-height: 950px) {
+  .hand-panel { position: relative; }
+}
 @media (max-height: 800px) {
   .hand-panel { position: relative; }
 }

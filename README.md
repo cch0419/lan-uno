@@ -51,6 +51,38 @@ npm start
 
 首次安装依赖需要网络，运行游戏不需要互联网，页面没有 CDN、外部字体或在线资源。
 
+### 房间语音聊天
+
+大厅和对局页面都有独立的麦克风、听筒开关，默认均关闭，语音与游戏音效的静音设置互不影响。
+
+- 点击“开启麦克风”，允许浏览器的麦克风权限，即可说话，同时默认开启听筒；之后两个开关可以分别控制。
+- 只点击“开启听筒”可以听朋友说话，不会申请录音权限。关麦后仍可继续收听；关听筒时仍可保持麦克风发送。
+- 语音只在当前房间成员之间传输，仅管理的房主和已完赛玩家也可使用。开始游戏、返回大厅不打断语音。
+- 离房、解散、断线、刷新或被新标签接管时会停止录音并关闭语音连接；重新连接后需自行开启，避免自动录音。
+- 如果浏览器阻止播放，点击控制条中的“恢复收听”。麦克风权限被拒绝不影响已有的收听，也不影响出牌。
+
+**手机通过普通 HTTP 局域网地址访问时，浏览器不允许开启麦克风，必须使用可信的 HTTPS。电脑上的 `http://localhost` 通常允许录音，但其他设备不能用这个地址连接主机。**
+
+局域网 Windows 启动方式：
+
+1. 停止原服务，双击 [start-https.bat](start-https.bat)。需要 OpenSSL；安装了 Git for Windows 的电脑通常已经具备，脚本也支持 PATH 中的 OpenSSL。
+2. 脚本在项目 `.certs` 目录生成本地 CA 和服务器证书，默认启动 `https://电脑IP:3443`。不会自动修改电脑或手机的证书信任设置。
+3. 把 **`.certs/lan-uno-ca.crt` 公共证书**传到自己的设备并安装信任。仅信任你自己生成的证书，不要传出或安装任何 `.key` 文件。私钥目录已从 Git 和 Docker 构建中排除。
+4. Windows：双击 CA 证书，将其导入“当前用户 → 受信任的根证书颁发机构”。iPhone：安装证书描述文件后，到“设置 → 通用 → 关于本机 → 证书信任设置”启用完全信任。Android：在“安全/加密与凭据 → 安装证书 → CA 证书”中安装，具体名称因系统而异。
+5. 用浏览器打开终端输出的 **HTTPS 局域网地址**，确认没有证书错误，再加入房间并点击开关。仅点击绕过证书警告，不能保证浏览器授予麦克风权限。允许主机的 TCP 3443 端口，WebRTC 直连也需要设备间的 UDP 通信。
+
+切换热点或网卡导致 IP 改变时，重新运行 `start-https.bat`，脚本会更新服务器证书并保留原 CA；设备通常不需要重新安装根证书。公开 CA 可在 HTTPS 服务的 `/voice-ca.crt` 下载，首次安装也可以直接传文件。
+
+已有可信证书时可以直接设置 `UNO_TLS_CERT`、`UNO_TLS_KEY`，然后运行 `npm start`；默认 HTTPS 端口为 3443，`PORT` 可覆盖。也可以使用配置好 WebSocket 转发的可信 HTTPS 反向代理，并通过 `UNO_ALLOWED_HOSTS` 放行实际域名。
+
+同局域网默认不依赖公网 STUN/TURN。跨公网、不同运营商或热点隔离时，WebRTC 可能无法直连；可通过 `UNO_VOICE_ICE_SERVERS` 配置自己的 STUN/TURN，格式为 JSON 数组，例如：
+
+```powershell
+$env:UNO_VOICE_ICE_SERVERS = '[{"urls":"turn:turn.example.com:3478","username":"user","credential":"password"}]'
+```
+
+TURN 配置会提供给客户端用于建立连接，请使用受限或短期凭据。浏览器语音使用 WebRTC 加密传输，游戏服务器只转发协商消息，不转发或保存录音。建议使用耳机减少同一空间内的回声；支持的设备会启用回声消除、降噪和自动增益。
+
 ### 安装报 EPERM / ENOTEMPTY 怎么办
 
 如果错误包含 `D:\Vue\NodeJs\node_cache`，说明系统的 npm 缓存目录不可写。项目 `.npmrc` 已避开这个目录；确认在本项目目录执行命令。也可显式指定：
@@ -170,6 +202,9 @@ public/audio/uno.wav 离线 UNO 语音
 public/audio/victory.wav 离线 Victory 胜利语音
 public/table-layout.js 圆桌视角与固定座次计算
 public/hand-layout.js 自适应扇形手牌布局与最小可见间距
+public/voice.js      麦克风/听筒开关、WebRTC 协商和录音释放
+server/voice.js      房间语音成员、信令校验与转发
+start-https.bat      Windows 局域网语音 HTTPS 启动入口
 public/app.js        WS 客户端、状态渲染和交互
 tests/               规则与真实联机测试
 DESIGN.md            13 章完整设计和过程计划
