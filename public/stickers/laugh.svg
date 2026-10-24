@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="168" height="160" viewBox="0 0 168 160" role="img" aria-label="笑不活了">
+<title>笑不活了</title><rect width="168" height="160" rx="22" fill="#faf5e8"/><circle cx="84" cy="73" r="57" fill="#e9b844" opacity=".13"/>
+<path d="M17 38l4 5 6-1-4 6 2 6-6-3-5 3 1-6-4-4 6-1Z" fill="#e9b844"/><path d="M139 32l4 7 8 1-6 5 1 8-7-4-7 4 2-8-6-5 8-1Z" fill="#eac263"/>
+<ellipse cx="85" cy="125" rx="44" ry="7" fill="#263b36" opacity=".1"/>
+<g transform="translate(12 5) rotate(-7 71 72)" stroke="#263b36" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
+<rect x="33" y="30" width="78" height="95" rx="13" fill="#e9b844" stroke="#fffdf4" stroke-width="5"/><ellipse cx="71" cy="76" rx="31" ry="35" fill="#fff6dc" opacity=".88" stroke="none"/>
+<path d="M47 65q7-12 14 0m20 0q7-12 14 0"/><path d="M49 82q23 31 45 0Z" fill="#fff6dc"/><path d="M58 95q14-10 28 0" stroke="#cf4c54"/><path d="M36 100l-14 8m85-8 14 8"/></g>
+<text x="84" y="148" text-anchor="middle" fill="#263b36" font-family="Microsoft YaHei, sans-serif" font-size="19" font-weight="900">笑不活了</text></svg>

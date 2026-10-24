@@ -6,6 +6,7 @@ import { pathToFileURL } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { RoomManager, send } from './rooms.js';
 import { openBrowser } from './open-browser.js';
+import { stickers } from '../public/chat-catalog.js';
 
 export function localAddresses() {
   return Object.values(networkInterfaces()).flat().filter(item =>
@@ -26,11 +27,17 @@ export async function createServer(options = {}) {
     ['/effects.js', 'effects.js', 'text/javascript; charset=utf-8'],
     ['/sounds.js', 'sounds.js', 'text/javascript; charset=utf-8'],
     ['/voice.js', 'voice.js', 'text/javascript; charset=utf-8'],
+    ['/chat.js', 'chat.js', 'text/javascript; charset=utf-8'],
+    ['/chat-catalog.js', 'chat-catalog.js', 'text/javascript; charset=utf-8'],
+    ['/chat.css', 'chat.css', 'text/css; charset=utf-8'],
     ['/audio/uno.wav', 'audio/uno.wav', 'audio/wav'],
     ['/audio/victory.wav', 'audio/victory.wav', 'audio/wav']
   ]) {
     files.set(route, { body: await readFile(new URL(`../public/${file}`, import.meta.url)), mime });
   }
+  for (const sticker of stickers) files.set(`/stickers/${sticker.id}.svg`, {
+    body: await readFile(new URL(`../public/stickers/${sticker.id}.svg`, import.meta.url)), mime: 'image/svg+xml'
+  });
   const iceServers = options.voiceIceServers ?? JSON.parse(process.env.UNO_VOICE_ICE_SERVERS ?? '[]');
   if (!Array.isArray(iceServers) || iceServers.length > 8 || iceServers.some(server => {
     const urls = Array.isArray(server?.urls) ? server.urls : [server?.urls];
@@ -56,13 +63,13 @@ export async function createServer(options = {}) {
     response.writeHead(200, {
       'Content-Type': file.mime, 'Cache-Control': 'no-store',
       'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer',
-      'Content-Security-Policy': "default-src 'self'; connect-src 'self' ws: wss:; media-src 'self' blob:; script-src 'self'; style-src 'self'; img-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+      'Content-Security-Policy': "default-src 'self'; connect-src 'self' ws: wss:; media-src 'self' blob:; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
       'Permissions-Policy': 'microphone=(self), camera=()'
     });
     response.end(request.method === 'HEAD' ? undefined : file.body);
   };
   const server = options.tls ? https.createServer(options.tls, handler) : http.createServer(handler);
-  const wss = new WebSocketServer({ noServer: true, maxPayload: 8192, perMessageDeflate: false });
+  const wss = new WebSocketServer({ noServer: true, maxPayload: 160 * 1024, perMessageDeflate: false });
   server.on('upgrade', (request, socket, head) => {
     let validOrigin = !request.headers.origin;
     try {
@@ -91,6 +98,7 @@ export async function createServer(options = {}) {
       let message;
       let malformed = false;
       try { message = JSON.parse(raw.toString()); } catch { malformed = true; }
+      if (message?.type !== 'CHAT_SEND' && raw.length > 8192) { socket.close(1009, 'Message too large'); return; }
       const now = Date.now();
       if (typeof message?.type === 'string' && message.type.startsWith('VOICE_')) {
         voiceTokens = Math.min(120, voiceTokens + (now - lastVoiceMessage) * 0.06);

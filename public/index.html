@@ -7,6 +7,7 @@
   <title>UNO · 局域网牌桌</title>
   <link rel="stylesheet" href="/styles.css">
   <link rel="stylesheet" href="/game.css">
+  <link rel="stylesheet" href="/chat.css">
   <script type="module" src="/app.js"></script>
 </head>
 <body>
@@ -113,6 +114,19 @@
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
   <div id="motionLayer" class="motion-layer" aria-hidden="true"></div>
   <div id="voiceAudio" hidden></div>
+  <button id="chatLauncher" class="chat-launcher" aria-controls="chatPanel" aria-expanded="false" hidden><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M5 4h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-6 4V6a2 2 0 0 1 2-2Z"/><path d="M7 9h10M7 13h7"/></svg> 聊天 <b id="chatUnread" hidden>0</b></button>
+  <section id="chatPanel" class="chat-panel" aria-label="牌桌聊天" hidden>
+    <header class="chat-header"><div><h2>牌桌聊天<span>一起玩，也一起聊。</span></h2><p>同房间的人都能看到</p></div><button id="chatClose" type="button" class="chat-close" aria-label="关闭聊天">×</button></header>
+    <div class="chat-history"><p id="chatEmpty" class="chat-empty">还没人说话，<br>发个表情打个招呼吧。</p><ol id="chatMessages" class="chat-messages" role="log" aria-live="polite" aria-relevant="additions" aria-label="聊天消息"></ol><button id="chatNewMessages" class="chat-new-messages" hidden>有新消息 ↓</button></div>
+    <div id="chatQuick" class="chat-picker" hidden><p class="chat-picker-label">点一下，直接发送</p><div id="chatPhrases" class="chat-phrases"></div><div id="chatEmojis" class="chat-emojis" aria-label="快捷表情"></div></div>
+    <div id="chatStickers" class="chat-stickers chat-picker" aria-label="内置表情包" hidden></div>
+    <form id="chatForm" class="chat-form">
+      <div class="chat-tools"><button id="chatQuickToggle" type="button" aria-expanded="false" aria-controls="chatQuick">快捷短语</button><button id="chatStickerToggle" type="button" aria-expanded="false" aria-controls="chatStickers">表情包</button><button id="chatUpload" type="button" data-chat-send title="发送图片或 GIF">＋ 图片</button><small id="chatCount">0/200</small></div>
+      <label class="chat-input-label" for="chatInput">发送消息</label><div class="chat-compose"><textarea id="chatInput" rows="2" maxlength="400" placeholder="说点什么…" enterkeyhint="send"></textarea><button id="chatSend" type="submit" disabled>发送 ↗</button></div>
+      <div class="chat-status-row"><span id="chatStatus" role="status"></span><button id="chatRetry" type="button" hidden>重新同步</button></div>
+      <input id="chatFile" type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden>
+    </form>
+  </section>
   <div id="announcement" class="announcement" role="status" aria-live="assertive" hidden><strong id="announcementTitle"></strong><span id="announcementDetail"></span></div>
 
   <dialog id="colorDialog"><div class="dialog-body"><p class="eyebrow">CHOOSE A COLOR</p><h2>接下来，什么颜色？</h2><p>选好颜色后提交这张变色牌。</p><div id="colorOptions" class="color-options"><button data-color="red" class="color-choice red">红色</button><button data-color="yellow" class="color-choice yellow">黄色</button><button data-color="green" class="color-choice green">绿色</button><button data-color="blue" class="color-choice blue">蓝色</button></div><button id="cancelColor" class="text-button">取消</button></div></dialog>
