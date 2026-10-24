@@ -109,6 +109,21 @@ test('unexpected tunnel termination disables invitations but leaves the Node ser
   assert.equal(invitation(network.clientConfig(), publicUrl).canCopy, false);
 });
 
+test('a rejected tunnel identity immediately invalidates the old URL even if the process is still alive', () => {
+  const child = new EventEmitter(); child.stdout = new PassThrough(); child.stderr = new PassThrough();
+  let kills = 0; child.kill = () => { kills++; };
+  const network = policy();
+  watchTunnel(child, network, { log() {}, warn() {} });
+  child.stderr.write('https://uno-test.trycloudflare.com\nINF Registered tunnel connection\n');
+  assert.equal(network.clientConfig().tunnelStatus, 'ready');
+  child.stderr.write('ERR Connection terminated error="control stream error: Unauthorized: Tunnel not found"\n');
+  assert.equal(network.clientConfig().tunnelStatus, 'failed');
+  assert.equal(network.clientConfig().publicUrl, null);
+  assert.equal(kills, 1);
+  child.stderr.write('INF Registered tunnel connection\n');
+  assert.equal(network.clientConfig().tunnelStatus, 'failed');
+});
+
 async function get(port, host, path = '/') {
   return new Promise((resolve, reject) => {
     http.get({ hostname: '127.0.0.1', port, path, headers: { Host: host } }, response => {

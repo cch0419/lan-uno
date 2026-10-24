@@ -7,7 +7,7 @@ body.in-game .room-header .eyebrow { display: none; }
 .game-caption { display: flex; justify-content: space-between; align-items: center; gap: 10px; color: var(--muted); font-size: 11px; margin: 8px 0 0; }
 .house-rules { padding: 4px 9px; background: #e9eadf; border-radius: 20px; font-size: 10px; }
 .game-grid { display: grid; grid-template-columns: minmax(0, 1fr) 210px; gap: 20px; align-items: center; }
-.board-region { min-width: 0; }
+.board-region { min-width: 0; padding: 14px; background: radial-gradient(ellipse at 50% 35%, #2b413c, #142421 80%); border: 2px solid #40554c; border-radius: 23px; box-shadow: inset 0 0 0 5px #0d19164d, 0 12px 30px #14242126; }
 .round-table { --felt: #19785c; --felt-dark: #104b3c; --glow: #89e1b4; position: relative; width: 100%; max-width: 820px; height: 520px; margin: 0 auto; isolation: isolate; }
 .round-table[data-color="red"] { --felt: #bc3a48; --felt-dark: #7c1d2e; --glow: #ffb7b9; }
 .round-table[data-color="yellow"] { --felt: #b8820d; --felt-dark: #795504; --glow: #ffe192; }
@@ -56,7 +56,7 @@ body.in-game .room-header .eyebrow { display: none; }
 .round-table #topCard .card-settle { animation: card-settle .36s cubic-bezier(.2, .8, .2, 1); }
 .game-grid .activity { padding: 20px 16px; align-self: center; }
 .game-grid .activity ol { max-height: 290px; }
-.hand-panel { position: sticky; bottom: 0; z-index: 5; margin: 4px 0 14px; padding: 15px 20px 8px; border-color: #d9e2cf; box-shadow: 0 -5px 25px #1a352411; background: #fffef9f5; backdrop-filter: blur(12px); }
+.hand-panel { position: relative; z-index: 5; margin: 4px 0 14px; padding: 15px 20px 8px; border-color: #d9e2cf; box-shadow: 0 -5px 25px #1a352411; background: #fffef9f5; backdrop-filter: blur(12px); }
 .hand-panel .hand-toolbar { align-items: center; flex-direction: row; }
 .hand-panel .hand-toolbar h2 { font-size: 15px; }
 .hand-panel .hand-toolbar .field-hint { max-width: 360px; margin-top: 4px; }
@@ -75,6 +75,28 @@ body.in-game .room-header .eyebrow { display: none; }
 .playing-card.drawn-in { animation: hand-receive .6s cubic-bezier(.2, .9, .25, 1.2); }
 .mobile-history { display: none; }
 .hand-panel .hand:empty { min-height: 0; padding: 0; }
+.hand-tools { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 8px; }
+.hand-tools .text-button { font-size: 11px; padding: 5px 0; }
+.hand-scroll-button { border: 1px solid #ccd8c8; border-radius: 9px; width: 38px; height: 30px; background: #edf2e5; color: #294737; margin-left: 5px; }
+.hand-panel .hand { scroll-behavior: smooth; -webkit-overflow-scrolling: touch; scrollbar-width: thin; scrollbar-color: #9eb596 transparent; }
+.hand-panel .hand { display: block; position: relative; overflow: visible; min-height: 0; padding: 0; touch-action: pan-y; }
+.hand-panel .hand .playing-card { position: absolute; margin: 0; transform-origin: center bottom; transform: rotate(var(--fan-angle, 0deg)); z-index: var(--fan-depth, 1); }
+.hand-panel .hand .playing-card .card-corner { left: 4px; top: 5px; font-size: 12px; white-space: nowrap; }
+.hand-panel .hand .playing-card:not(:disabled):hover, .hand-panel .hand .playing-card:not(:disabled):focus-visible { transform: translateY(-20px) rotate(var(--fan-angle, 0deg)); z-index: 2000; }
+.hand-panel.fan-multiple { position: relative; bottom: auto; }
+.hand-tools small { color: #7b8a73; font-size: 10px; }
+.rule-settings { display: grid; gap: 10px; margin: 12px 0; padding: 14px; background: #f2f5ec; border: 1px solid #dfe6d7; border-radius: 12px; }
+.rule-settings label { display: flex; gap: 9px; align-items: center; margin: 0; font-size: 12px; }
+.rule-settings input[type="checkbox"] { width: 17px; height: 17px; margin: 0; accent-color: #175c4a; }
+.rule-settings #initialCards { width: 75px; padding: 6px 9px; margin-left: auto; }
+.rule-settings small { font-size: 10px; color: #79817a; }
+.player-time { display: flex; flex-direction: column; gap: 3px; margin: 0; font-size: 9px; color: #687c68; }
+.player-time input { width: 90px; padding: 7px; font-size: 11px; }
+.catch-uno-notice { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: 10px 0; padding: 10px 15px; background: #fff0be; color: #72510b; border: 1px solid #e5bd54; border-radius: 12px; font-size: 12px; }
+.catch-uno-notice .button { padding: 8px 10px; font-size: 11px; flex-shrink: 0; }
+.round-table .wild-response { display: block; border: 1px solid #fff4b65e; border-radius: 12px; background: #10251ed9; padding: 10px; margin-top: 10px; }
+.wild-response strong { display: block; color: #ffe29b; font-size: 14px; margin-bottom: 8px; }
+.wild-response > div { display: flex; gap: 8px; justify-content: center; }
 .host-settings { flex-wrap: wrap; }
 #turnSeconds { width: 80px; }
 .turn-clock { width: 150px; margin: -7px auto 9px; color: #fff8df; font-size: 9px; }
@@ -137,6 +159,10 @@ body.in-game .room-header .eyebrow { display: none; }
   .mobile-history ol { margin: 0; padding: 8px 25px; line-height: 1.9; background: #fffef5; border-radius: 12px; }
 }
 @media (max-width: 720px) {
+  .board-region { padding: 10px; border-radius: 17px; }
+  .catch-uno-notice { font-size: 10px; padding: 8px 10px; }
+  .player-time input { width: 78px; }
+  .hand-tools .text-button { font-size: 10px; }
   body.in-game .shell { padding: 0 10px; }
   body.in-game .site-header { height: 55px; padding: 0 5px; }
   body.in-game .brand-mark { width: 29px; height: 31px; border-radius: 9px; font-size: 22px; }
@@ -149,7 +175,7 @@ body.in-game .room-header .eyebrow { display: none; }
   body.in-game .room-controls .text-button { font-size: 10px; }
   .game-caption { font-size: 9px; margin: 6px 5px 1px; }
   .house-rules { font-size: 8px; padding: 3px 7px; }
-  .round-table { height: clamp(350px, calc(100svh - 310px), 480px); }
+  .round-table { height: clamp(350px, calc(100svh - 350px), 440px); }
   .round-table .felt-table { inset: 40px 33px 39px; }
   .round-table .felt-table::before { inset: 10px; }
   .table-center { width: 224px; top: 49%; }
@@ -190,7 +216,7 @@ body.in-game .room-header .eyebrow { display: none; }
   .draw-button strong { font-size: 15px; }
   .draw-button small { font-size: 8px; }
   .hand-panel .hand-actions .uno-button { min-width: 58px; min-height: 48px; font-size: 16px; padding: 8px; }
-  .hand-panel .hand { min-height: 132px; padding: 13px 3px 9px; gap: 8px; }
+  .hand-panel .hand { min-height: 0; padding: 0; }
   .hand-panel .playing-card { width: 73px; height: 105px; border-width: 4px; }
   .hand-panel .playing-card .card-center { font-size: 28px; inset: 21px 4px 16px; }
   .hand-panel .playing-card .card-color-label { font-size: 7px; }

@@ -13,6 +13,7 @@ function fixture(hands, top = 'red:5', extra = {}) {
   }
   const ids = Object.keys(hands);
   const game = createGame(ids);
+  game.rules.autoUno = false; // Existing fixtures exercise explicit UNO/catch mode.
   game.hands = Object.fromEntries(Object.entries(hands).map(([id, cards]) => [id, cards.map(take)]));
   game.discardPile = [take(top)];
   game.drawPile = pack;
@@ -49,6 +50,18 @@ test('108 unique cards with the classic distribution; deal to 2 through 10 playe
     }
     assert.notEqual(game.discardPile[0].kind, 'wild4');
   }
+});
+
+test('automatic UNO defaults on, declares exactly once and leaves no catch window', () => {
+  assert.equal(createGame(['A', 'B']).rules.autoUno, true);
+  const g = fixture({ A: ['red:1', 'blue:2'], B: ['red:3', 'yellow:4'] });
+  g.rules.autoUno = true;
+  const next = play(g).game;
+  assert.deepEqual(next.unoDeclaredIds, ['A']);
+  assert.equal(next.unoWindow, null);
+  assert.equal(next.log.filter(event => event.kind === 'uno').length, 1);
+  assert.equal(gameView(next, 'A').actions.canCallUno, false);
+  assert.throws(() => act(next, 'CATCH_UNO', { targetPlayerId: 'A', windowId: 'fake' }, 'B'));
 });
 
 test('numeric matching remains; colored action cards follow color, never just the symbol', () => {
@@ -139,7 +152,7 @@ test('unplayable draw advances identically; passing is not a supported command',
   assert.equal(next.hands.A.length, 2);
 });
 
-test('UNO on play is atomic; omitted UNO has no penalty and catch is unsupported', () => {
+test('UNO on play is atomic; missed declaration opens one catch opportunity', () => {
   const g = fixture({ A: ['red:1', 'blue:2'], B: ['blue:1'], C: ['green:1'] });
   const called = play(g, 0, { declareUno: true }).game;
   assert.deepEqual(called.unoDeclaredIds, ['A']);
@@ -147,9 +160,61 @@ test('UNO on play is atomic; omitted UNO has no penalty and catch is unsupported
   const missed = play(g).game;
   assert.deepEqual(missed.unoDeclaredIds, []);
   assert.equal(missed.hands.A.length, 1);
-  assert.equal('unoWindow' in missed, false);
-  assert.throws(() => act(missed, 'CATCH_UNO'), { code: 'UNKNOWN_EVENT' });
-  assert.equal(missed.hands.A.length, 1);
+  assert.equal(missed.unoWindow.playerId, 'A');
+  const caught = act(missed, 'CATCH_UNO', { windowId: missed.unoWindow.id, targetPlayerId: 'A' }, 'C').game;
+  assert.equal(caught.hands.A.length, 3);
+  assert.equal(caught.unoWindow, null);
+  assert.equal(caught.currentPlayerId, missed.currentPlayerId);
+  assert.equal(caught.turnId, missed.turnId);
+});
+
+test('UNO/catch races are serialized; repeats, self catches and late catches are rejected', () => {
+  const missed = play(fixture({ A: ['red:1', 'blue:2'], B: ['green:3'], C: ['yellow:1'] })).game;
+  const payload = { windowId: missed.unoWindow.id, targetPlayerId: 'A' };
+  assert.throws(() => act(missed, 'CATCH_UNO', payload, 'A'), { code: 'INVALID_CATCH' });
+  const called = act(missed, 'CALL_UNO', {}, 'A').game;
+  assert.throws(() => act(called, 'CATCH_UNO', payload, 'C'), { code: 'STALE_UNO_WINDOW' });
+  const caught = act(missed, 'CATCH_UNO', payload, 'C').game;
+  assert.throws(() => act(caught, 'CATCH_UNO', payload, 'B'), { code: 'STALE_UNO_WINDOW' });
+  assert.throws(() => act(caught, 'CALL_UNO', {}, 'A'), { code: 'INVALID_UNO' });
+  assert.throws(() => act(missed, 'PLAY_CARD', { cardId: 'fake' }), { code: 'CARD_NOT_OWNED' });
+  assert.equal(missed.unoWindow.id, payload.windowId);
+  const advanced = act(missed, 'DRAW_CARD').game;
+  assert.equal(advanced.unoWindow, null);
+  assert.throws(() => act(advanced, 'CATCH_UNO', payload, 'C'), { code: 'STALE_UNO_WINDOW' });
+});
+
+test('host rule switches control catch, action matching, deal size and automatic +4 settlement', () => {
+  const base = fixture({ A: ['red:1', 'blue:2'], B: ['green:3'] });
+  base.rules.catchUno = false;
+  const missed = play(base).game;
+  assert.equal(missed.unoWindow, null);
+  assert.throws(() => act(missed, 'CATCH_UNO'), { code: 'CATCH_DISABLED' });
+  const cross = fixture({ A: ['blue:reverse', 'red:1'], B: ['blue:1'] }, 'red:reverse');
+  cross.rules.allowActionMatch = true;
+  assert.equal(play(cross).game.activeColor, 'blue');
+  for (const n of [2, 10]) {
+    const g = createGame(Array.from({ length: n }, (_, i) => String(i)), undefined, { initialCards: 10 });
+    assertGame(g);
+    assert.ok(Object.values(g.hands).every(h => h.length === 10 || h.length === 12));
+  }
+  const noChallenge = fixture({ A: ['wild4'], B: ['blue:1'], C: ['green:2'] });
+  noChallenge.rules.challengeWild4 = false;
+  const next = play(noChallenge, 0, { chosenColor: 'blue' }).game;
+  assert.equal(next.pendingWild4, null);
+  assert.equal(next.hands.B.length, 5);
+  assert.equal(next.currentPlayerId, 'C');
+  assert.deepEqual(next.finishOrder, ['A']);
+});
+
+test('catching a +4 actor never changes the private legality evidence snapshot', () => {
+  const original = fixture({ A: ['wild4', 'red:1'], B: ['blue:1'], C: ['green:1'] });
+  const pending = play(original, 0, { chosenColor: 'green' }).game;
+  const caught = act(pending, 'CATCH_UNO', { windowId: pending.unoWindow.id, targetPlayerId: 'A' }, 'C').game;
+  const result = act(caught, 'CHALLENGE_WILD4', { pendingId: caught.pendingWild4.id });
+  assert.deepEqual(result.evidence.handBeforePlay, original.hands.A);
+  assert.equal(result.game.hands.A.length, 7);
+  assert.equal(result.game.currentPlayerId, 'B');
 });
 
 test('UNO can be announced once with one card; drawing resets the declaration', () => {

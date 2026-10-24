@@ -1,8 +1,11 @@
-import { randomBytes, randomInt, randomUUID } from 'node:crypto';
-import { createGame, applyCommand, applyTurnTimeout, activePlayers, gameView, RuleError, requireRule } from './game.js';
+import { createHash, randomBytes, randomInt, randomUUID } from 'node:crypto';
+import { VoiceHub } from './voice.js';
+import { RoomChat } from './chat.js';
+import { createGame, applyCommand, applyTurnTimeout, activePlayers, gameView, RuleError, requireRule, normalizeRules } from './game.js';
+import { SocialHub, SOCIAL_COMMANDS } from './social.js';
 
 const GAME_COMMANDS = new Set(['CHOOSE_INITIAL_COLOR', 'PLAY_CARD', 'DRAW_CARD',
-  'CALL_UNO', 'ACCEPT_WILD4', 'CHALLENGE_WILD4']);
+  'CALL_UNO', 'CATCH_UNO', 'ACCEPT_WILD4', 'CHALLENGE_WILD4']);
 
 export function send(socket, type, payload) {
   if (socket?.readyState !== 1) return;
@@ -20,6 +23,13 @@ export class RoomManager {
     this.sessionTtl = sessionTtl;
     this.actionDelayMs = actionDelayMs;
     this.now = now;
+    this.voice = new VoiceHub({ send, roomFor: player => this.roomFor(player), getPlayer: id => this.players.get(id) });
+    this.social = new SocialHub({ now, roomFor: player => this.roomFor(player), broadcast: (room, payload) => {
+      for (const id of room.playerIds) {
+        const socket = this.players.get(id)?.socket;
+        send(socket, 'SOCIAL', payload);
+      }
+    } });
   }
 
   roomFor(player) {
@@ -46,10 +56,10 @@ export class RoomManager {
     const rankOf = id => room.game?.ranking.find(entry => entry.playerId === id)?.rank ??
       ((room.game?.finishOrder.indexOf(id) ?? -1) + 1 || null);
     return {
-      roomCode: room.code, revision: room.revision, hostId: room.hostId,
+      roomCode: room.code, revision: room.revision, hostId: room.hostId, chatId: room.chat.id,
       maxPlayers: room.maxPlayers, status: room.status, info: room.info,
       participantCount: this.participants(room).length,
-      turnSeconds: room.turnSeconds, serverTime: this.now(),
+      turnSeconds: room.turnSeconds, turnSecondsByPlayer: room.turnSecondsByPlayer, rules: room.rules, serverTime: this.now(),
       disconnectGraceSeconds: Math.round(this.disconnectGrace / 1000),
       players: rosterIds.map(id => {
         const member = this.players.get(id);
@@ -61,7 +71,9 @@ export class RoomManager {
       you: { playerId: player.id, hand: projected?.hand ?? [],
         isParticipating: room.game ? room.game.seatOrder.includes(player.id) : !room.spectatorIds.includes(player.id),
         isFinished: !!room.game?.finishOrder.includes(player.id), rank: rankOf(player.id) },
-      game: projected ? { ...projected.game, clock: room.turnClock } : null, actions: projected?.actions ?? {}
+      game: projected ? { ...projected.game, clock: room.turnClock } : null, actions: projected?.actions ?? {},
+      social: { speakers: this.social.speakers(room) },
+      voiceMembers: [...this.voice.members.values()].filter(m => m.roomCode === room.code && m.mic).map(m => ({ playerId: m.id }))
     };
   }
 
@@ -88,6 +100,8 @@ export class RoomManager {
       this.players.set(player.id, player);
     }
     const previousSocket = player.socket;
+    this.voice.leave(player.id);
+    if (previousSocket && previousSocket !== socket) this.social.end(player.id);
     player.socket = socket;
     player.online = true;
     player.disconnectedAt = null;
@@ -119,9 +133,10 @@ export class RoomManager {
   startClock(room, now = this.now()) {
     if (!room.game || room.game.phase === 'finished') { room.turnClock = null; return; }
     const startsAt = now + this.actionDelayMs;
+    const durationMs = (room.turnSecondsByPlayer?.[room.game.currentPlayerId] ?? room.turnSeconds) * 1000;
     room.turnClock = { gameId: room.game.id, turnId: room.game.turnId, phase: room.game.phase,
-      startsAt, deadlineAt: startsAt + room.turnSeconds * 1000, paused: false,
-      remainingMs: room.turnSeconds * 1000, readyRemainingMs: 0 };
+      startsAt, deadlineAt: startsAt + durationMs, durationMs, paused: false,
+      remainingMs: durationMs, readyRemainingMs: 0 };
   }
 
   refreshPause(room, now) {
@@ -166,9 +181,9 @@ export class RoomManager {
       if (!this.rooms.has(candidate)) { code = candidate; break; }
     }
     requireRule(code !== undefined, 'ROOM_CODE_EXHAUSTED', '房间编号已用完');
-    const room = { code, maxPlayers, turnSeconds, turnClock: null, hostId: player.id, playerIds: [player.id],
+    const room = { code, maxPlayers, turnSeconds, turnSecondsByPlayer: {}, rules: normalizeRules(), turnClock: null, hostId: player.id, playerIds: [player.id],
       spectatorIds: hostParticipates ? [] : [player.id],
-      status: 'waiting', revision: 1, game: null, info: '邀请朋友输入房间号加入，至少 2 人即可开始。' };
+      status: 'waiting', revision: 1, game: null, chat: new RoomChat(), info: '邀请朋友输入房间号加入，至少 2 人即可开始。' };
     this.rooms.set(code, room);
     player.roomCode = code;
     return room;
@@ -190,13 +205,18 @@ export class RoomManager {
 
   leave(player, reason = 'left') {
     const room = this.roomFor(player);
+    this.voice.leave(player.id);
+    this.social.end(player.id);
+    room.chat.budgets.delete(player.id);
     const wasPlaying = room.game?.seatOrder.includes(player.id) && !room.game.finishOrder.includes(player.id);
     room.playerIds = room.playerIds.filter(id => id !== player.id);
     room.spectatorIds = room.spectatorIds.filter(id => id !== player.id);
+    delete room.turnSecondsByPlayer[player.id];
     player.roomCode = null;
     send(player.socket, 'STATE', null);
     if (!room.playerIds.length) { this.rooms.delete(room.code); return null; }
     if (room.game && wasPlaying) {
+      this.social.clearRoom(room);
       room.info = room.status === 'playing'
         ? `${player.nickname}${reason === 'timeout' ? '重连超时' : '退出了游戏'}，本局中止，可以重新开始。`
         : '有玩家离开，已返回等待大厅。';
@@ -233,13 +253,27 @@ export class RoomManager {
           ? !room.spectatorIds.includes(player.id) : data.hostParticipates;
         this.validateCapacity(maxPlayers);
         this.validateTurnSeconds(turnSeconds);
+        const rules = normalizeRules({ ...room.rules, ...(data.rules ?? {}) });
+        if (data.rules !== undefined) normalizeRules(data.rules);
+        const turnSecondsByPlayer = { ...room.turnSecondsByPlayer };
+        if (data.turnSecondsByPlayer !== undefined) {
+          const overrides = data.turnSecondsByPlayer;
+          requireRule(overrides && typeof overrides === 'object' && !Array.isArray(overrides), 'INVALID_PLAYER_TIMES', '个人时间设置格式错误');
+          for (const key of Object.keys(turnSecondsByPlayer)) delete turnSecondsByPlayer[key];
+          for (const [id, seconds] of Object.entries(overrides)) {
+            requireRule(room.playerIds.includes(id), 'INVALID_PLAYER_TIMES', '个人时间只能设置给本房间成员');
+            this.validateTurnSeconds(seconds);
+            turnSecondsByPlayer[id] = seconds;
+          }
+        }
         requireRule(typeof hostParticipates === 'boolean', 'INVALID_PARTICIPATION', '请选择房主是否参与游戏');
         const spectatorIds = room.spectatorIds.filter(id => id !== player.id);
         if (!hostParticipates) spectatorIds.push(player.id);
         const participantCount = room.playerIds.filter(id => !spectatorIds.includes(id)).length;
         // Validate all proposed settings before committing either field.
         requireRule(maxPlayers >= participantCount, 'TOO_MANY_PLAYERS', '玩家席位已满，请先增加人数上限或等待玩家退出');
-        room.maxPlayers = maxPlayers; room.turnSeconds = turnSeconds; room.spectatorIds = spectatorIds; room.revision++;
+        room.maxPlayers = maxPlayers; room.turnSeconds = turnSeconds; room.rules = rules;
+        room.turnSecondsByPlayer = turnSecondsByPlayer; room.spectatorIds = spectatorIds; room.revision++;
         break;
       }
       case 'HOST_TRANSFER':
@@ -250,7 +284,9 @@ export class RoomManager {
         break;
       case 'ROOM_CLOSE': {
         const closing = this.hostRoom(player);
+        this.social.clearRoom(closing);
         for (const id of closing.playerIds) {
+          this.voice.leave(id);
           const member = this.players.get(id);
           member.roomCode = null;
           send(member.socket, 'ROOM_CLOSED', { reason: 'host_closed' });
@@ -263,7 +299,7 @@ export class RoomManager {
         requireRule(room.status === 'waiting', 'GAME_STARTED', '本局已经开始，请勿重复操作');
         requireRule(this.participants(room).length >= 2, 'NEED_PLAYERS', '至少需要 2 名参与游戏的玩家，仅管理的房主不计入人数');
         requireRule(this.participants(room).every(id => this.players.get(id).online), 'PLAYER_OFFLINE', '请等待所有参与游戏的玩家上线');
-        room.game = createGame(this.participants(room));
+        room.game = createGame(this.participants(room), undefined, room.rules);
         room.game.playerNames = Object.fromEntries(room.game.seatOrder.map(id => [id, this.players.get(id).nickname]));
         this.startClock(room);
         room.status = 'playing'; room.info = ''; room.revision++;
@@ -271,13 +307,14 @@ export class RoomManager {
       case 'RETURN_TO_LOBBY':
         room = this.hostRoom(player);
         requireRule(room.status === 'finished', 'GAME_NOT_FINISHED', '游戏还没有结束');
+        this.social.clearRoom(room);
         room.game = null; room.turnClock = null; room.status = 'waiting'; room.info = '上一局已结束，准备好后可以再次开始。'; room.revision++;
         break;
       default: {
         requireRule(GAME_COMMANDS.has(message.type), 'UNKNOWN_EVENT', '无法识别的操作');
         room = this.roomFor(player);
         requireRule(room.game, 'NO_GAME', '游戏尚未开始');
-        if (message.type !== 'CALL_UNO' && room.status === 'playing' && !room.game.paused) {
+        if (!['CALL_UNO', 'CATCH_UNO'].includes(message.type) && room.status === 'playing' && !room.game.paused) {
           requireRule(!this.timeoutRoom(room, this.now()), 'TURN_TIMED_OUT', '本回合已超时，已自动处理');
           requireRule(!room.turnClock || this.now() >= room.turnClock.startsAt,
             'ANIMATION_IN_PROGRESS', '请等上一张牌落桌后再出牌');
@@ -312,14 +349,54 @@ export class RoomManager {
       }
       player = this.players.get(socket.playerId);
       requireRule(player?.socket === socket, 'SESSION_REQUIRED', '请先连接，或此窗口已被其他窗口接管');
-      signature = JSON.stringify([message.type, message.payload]);
+      if (message.type.startsWith('VOICE_')) {
+        this.voice.handle(player, message.type, message.payload);
+        send(socket, 'COMMAND_RESULT', { requestId: message.requestId, ok: true });
+        return;
+      }
+      // Hash large image requests instead of retaining their base64 in the cache.
+      signature = createHash('sha256').update(JSON.stringify([message.type, message.payload])).digest('hex');
       const cached = player.requests.get(message.requestId);
       if (cached) {
         requireRule(cached.signature === signature, 'REQUEST_ID_REUSED', '请求编号不能重复用于不同操作');
+        if (message.type === 'CHAT_SYNC' && cached.result.ok) {
+          const room = this.roomFor(player);
+          requireRule(message.payload.roomCode === room.code && message.payload.chatId === room.chat.id,
+            'CHAT_STALE_ROOM', '聊天房间已变化，请重新加入');
+          send(socket, 'COMMAND_RESULT', cached.result);
+          send(socket, 'CHAT_HISTORY', room.chat.history(room.code));
+          return;
+        }
         send(socket, 'COMMAND_RESULT', cached.result);
+        if (message.type === 'CHAT_SEND' || message.type === 'CHAT_SYNC' || SOCIAL_COMMANDS.has(message.type)) return;
         for (const item of cached.privateMessages) send(socket, item.type, item.payload);
         send(socket, 'STATE', player.roomCode ? this.view(this.roomFor(player), player) : null);
         return;
+      }
+      if (message.type === 'CHAT_SEND' || message.type === 'CHAT_SYNC') {
+        const room = this.roomFor(player);
+        requireRule(message.payload.roomCode === room.code && message.payload.chatId === room.chat.id,
+          'CHAT_STALE_ROOM', '聊天房间已变化，请重新加入');
+        let history;
+        if (message.type === 'CHAT_SYNC') history = room.chat.history(room.code);
+        else {
+          const item = room.chat.post(player, message.payload, this.now());
+          for (const id of room.playerIds) send(this.players.get(id)?.socket, 'CHAT_MESSAGE', {
+            roomCode: room.code, chatId: room.chat.id, message: item
+          });
+        }
+        const result = { requestId: message.requestId, ok: true };
+        this.remember(player, message.requestId, signature, result, []);
+        send(socket, 'COMMAND_RESULT', result);
+        if (history) send(socket, 'CHAT_HISTORY', history);
+        return;
+      }
+      if (SOCIAL_COMMANDS.has(message.type)) {
+        this.social.command(player, message.type, message.payload);
+        const result = { requestId: message.requestId, ok: true };
+        this.remember(player, message.requestId, signature, result, []);
+        send(socket, 'COMMAND_RESULT', result);
+        return; // Reactions must not publish game snapshots or reset clocks.
       }
       const { room, privateMessages } = this.execute(player, message);
       const result = { requestId: message.requestId, ok: true };
@@ -347,6 +424,8 @@ export class RoomManager {
   disconnect(socket, now = this.now()) {
     const player = this.players.get(socket.playerId);
     if (!player || player.socket !== socket) return;
+    this.voice.leave(player.id);
+    this.social.end(player.id);
     player.socket = null; player.online = false; player.disconnectedAt = now;
     if (!player.roomCode) return;
     const room = this.roomFor(player);
@@ -357,6 +436,7 @@ export class RoomManager {
   }
 
   sweep(now = this.now()) {
+    this.social.sweep(now);
     for (const player of this.players.values()) {
       for (const [id, entry] of player.requests) {
         if (now - entry.time > 5 * 60_000) player.requests.delete(id);

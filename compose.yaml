@@ -1,0 +1,24 @@
+name: lan-uno
+
+services:
+  uno:
+    image: lan-uno:local
+    build:
+      context: .
+      target: runtime
+    restart: unless-stopped
+    init: true
+    ports:
+      - "${UNO_BIND_IP:-0.0.0.0}:${PORT:-3000}:3000"
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      UNO_ALLOWED_HOSTS: "${UNO_ALLOWED_HOSTS:-}"
+      UNO_PUBLIC_URL: "${UNO_PUBLIC_URL:-}"
+      UNO_VOICE_ICE_SERVERS: '${UNO_VOICE_ICE_SERVERS:-[]}'
+      UNO_OPEN_BROWSER: "0"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

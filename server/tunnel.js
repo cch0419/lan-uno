@@ -10,9 +10,19 @@ export function watchTunnel(child, network, { log = console.log, warn = console.
   let announcedUrl = null;
   let closed = false;
   let intentional = false;
+  let invalidated = false;
   const buffers = { stdout: '', stderr: '' };
   network.setTunnelStatus('starting');
   const line = value => {
+    if (invalidated || intentional) return;
+    if (/Unauthorized:\s*Tunnel not found|Invalid tunnel secret|Record for tunnel not found/i.test(value)) {
+      invalidated = true;
+      registered = false;
+      network.configurePublicUrl('', 'failed');
+      warn('公网临时隧道标识已失效（Tunnel not found），旧邀请网址不可再用。请重新运行公网模式取得新网址；局域网服务继续运行。');
+      child.kill(); // Stop only this owned, invalid tunnel rather than retry forever.
+      return;
+    }
     const found = quickTunnelUrl(value);
     if (found && found !== publicUrl) {
       publicUrl = found;

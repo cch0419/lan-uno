@@ -1,7 +1,7 @@
 const colors = { red: '红色', yellow: '黄色', green: '绿色', blue: '蓝色' };
 
 /** Visual effects consume public events only; they never decide game state. */
-export function createEffects({ createCard, getState, playerName }) {
+export function createEffects({ createCard, getState, playerName, playSound = () => {} }) {
   const layer = document.getElementById('motionLayer');
   const reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
   const flights = new Set();
@@ -79,9 +79,11 @@ export function createEffects({ createCard, getState, playerName }) {
   }
 
   async function animateEvents(events, previous, next, isCurrent = () => true) {
-    if (document.hidden || reduced.matches) return;
+    if (document.hidden) return;
+    if (reduced.matches) { for (const event of events) { if (isCurrent()) playSound(event); } return; }
     for (const event of events) {
       if (!isCurrent()) return;
+      playSound(event);
       if (event.kind === 'played') {
         const own = event.playerId === previous.you.playerId;
         const cardNode = own ? [...document.querySelectorAll('#hand .playing-card')].find(node => node.dataset.cardId === event.card.id) : null;
@@ -94,14 +96,17 @@ export function createEffects({ createCard, getState, playerName }) {
         const landed = createCard(event.card);
         landed.classList.add('card-settle');
         document.getElementById('topCard').replaceChildren(landed);
+        const ripple = document.createElement('div'); ripple.className = 'card-impact';
+        const landing = center(rect(document.getElementById('topCard')));
+        ripple.style.left = `${landing.x}px`; ripple.style.top = `${landing.y}px`; temporary(ripple, 900);
         document.getElementById('roundTable').dataset.color = event.color;
-        document.getElementById('activeColor').textContent = `跟${colors[event.color]}`;
+        document.getElementById('roundTable').setAttribute('aria-label', `${colors[event.color]}牌桌`);
         if (event.card.kind === 'wild' || event.card.kind === 'wild4') burst(`${event.card.kind}-burst`, event.color);
       } else if (event.kind === 'skipped') {
         stamp('⊘', event.targetId, 'skip-stamp');
       } else if (event.kind === 'reversed') {
         burst('reverse-burst');
-      } else if (['drawn', 'penalty', 'accepted', 'challenge_won', 'challenge_lost'].includes(event.kind)) {
+      } else if (['drawn', 'penalty', 'accepted', 'challenge_won', 'challenge_lost', 'caught_uno'].includes(event.kind)) {
         const targetId = event.targetId ?? event.playerId;
         if (event.kind === 'penalty') { stamp('+2', targetId, 'draw-stamp'); await sleep(300); }
         if (!isCurrent()) return;
@@ -143,6 +148,7 @@ export function createEffects({ createCard, getState, playerName }) {
     if (!next?.game || document.hidden) return;
     for (const event of events) {
       if (event.kind === 'uno') announcementQueue.push({ kind: 'uno', title: 'UNO!', detail: `${playerName(event.playerId)} 只剩一张牌了！` });
+      if (event.kind === 'caught_uno') announcementQueue.push({ kind: 'uno', title: '抓漏成功！', detail: `${playerName(event.targetId)} 罚抽 ${event.count} 张` });
       if (event.kind === 'player_finished') announcementQueue.push({ kind: 'finish', title: `第 ${event.rank} 名 · 完赛！`, detail: `${playerName(event.playerId)} 已出完手牌` });
     }
     const game = next.game;
