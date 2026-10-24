@@ -253,7 +253,7 @@ export function applyCommand(original, actorId, command, random = randomInt, { a
         game.activeColor = wild ? p.chosenColor : card.color;
         game.dryPassPlayerIds = [];
         note('played', { card, color: game.activeColor, targetId: nextPlayer(game, actorId) });
-        if (hand.length === 1 && p.declareUno) {
+        if (hand.length === 1) {
           game.unoDeclaredIds.push(actorId);
           note('uno');
         }

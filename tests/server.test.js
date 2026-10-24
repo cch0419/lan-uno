@@ -67,6 +67,31 @@ test('HTTP serves only local assets, rejects wrong Host and foreign WebSocket Or
   assert.equal(response.status, 200);
   assert.match(await response.text(), /局域网牌桌/);
   assert.equal((await fetch(`http://127.0.0.1:${port}/styles.css`)).status, 200);
+  for (const route of ['/chat.js', '/chat-catalog.js', '/chat.css', '/stickers/draw-four.svg']) {
+    assert.equal((await fetch(`http://127.0.0.1:${port}${route}`)).status, 200);
+  }
+  const voiceModule = await fetch(`http://127.0.0.1:${port}/voice.js`);
+  assert.equal(voiceModule.status, 200);
+  assert.match(voiceModule.headers.get('permissions-policy'), /microphone=\(self\)/);
+  assert.deepEqual(await (await fetch(`http://127.0.0.1:${port}/voice-config.json`)).json(), { iceServers: [] });
+  assert.equal((await fetch(`http://127.0.0.1:${port}/.certs/server.key`)).status, 404);
+  const sounds = await fetch(`http://127.0.0.1:${port}/sounds.js`);
+  assert.equal(sounds.status, 200);
+  assert.match(sounds.headers.get('content-type'), /javascript/);
+  const voice = await fetch(`http://127.0.0.1:${port}/audio/uno.wav`);
+  assert.equal(voice.status, 200);
+  assert.equal(voice.headers.get('content-type'), 'audio/wav');
+  const wave = Buffer.from(await voice.arrayBuffer());
+  assert.equal(wave.toString('ascii', 0, 4), 'RIFF');
+  assert.equal(wave.toString('ascii', 8, 12), 'WAVE');
+  assert.ok(wave.length > 1000);
+  const victory = await fetch(`http://127.0.0.1:${port}/audio/victory.wav`);
+  assert.equal(victory.status, 200);
+  assert.equal(victory.headers.get('content-type'), 'audio/wav');
+  const victoryWave = Buffer.from(await victory.arrayBuffer());
+  assert.equal(victoryWave.toString('ascii', 0, 4), 'RIFF');
+  assert.equal(victoryWave.toString('ascii', 8, 12), 'WAVE');
+  assert.ok(victoryWave.length > 1000);
   assert.equal((await fetch(`http://127.0.0.1:${port}/server/game.js`)).status, 404);
   // Fetch may normalize/replace Host. Use raw HTTP to test a hostile header.
   const wrongHostStatus = await new Promise((resolve, reject) => {
@@ -274,9 +299,9 @@ test('host can switch participation in the lobby; full seats and invalid setting
   manager.join(b, room.code);
   const before = structuredClone(room);
   assert.throws(() => manager.execute(host, { type: 'ROOM_UPDATE', payload: { hostParticipates: true } }), { code: 'TOO_MANY_PLAYERS' });
-  assert.deepEqual(room, before);
+  assert.deepEqual(structuredClone(room), before);
   assert.throws(() => manager.execute(host, { type: 'ROOM_UPDATE', payload: { hostParticipates: 'false' } }), { code: 'INVALID_PARTICIPATION' });
-  assert.deepEqual(room, before);
+  assert.deepEqual(structuredClone(room), before);
   manager.execute(host, { type: 'ROOM_UPDATE', payload: { maxPlayers: 3, hostParticipates: true } });
   assert.equal(manager.participants(room).length, 3);
   assert.equal(room.maxPlayers, 3);
@@ -337,4 +362,174 @@ test('spectator reconnect cannot unpause a disconnected participant; spectator l
   manager.leave(a);
   assert.equal(room.status, 'waiting');
   assert.equal(room.game, null);
+});
+
+test('voice signaling is room scoped and does not advance game revisions or deadlines', async t => {
+  const { clients: [a, b, c], app } = await setup(t, 3);
+  await a.command('ROOM_CREATE', { maxPlayers: 3 });
+  await b.command('ROOM_JOIN', { code: a.state.roomCode });
+  await c.command('ROOM_CREATE', { maxPlayers: 2 });
+  await a.command('GAME_START');
+  const room = app.manager.rooms.get(a.state.roomCode);
+  const before = { revision: room.revision, clock: structuredClone(room.turnClock), hand: structuredClone(a.state.you.hand) };
+  const code = room.code;
+  assert.equal((await a.command('VOICE_JOIN', { roomCode: code, mic: true, listening: true })).ok, true);
+  assert.equal((await b.command('VOICE_JOIN', { roomCode: code, mic: false, listening: true })).ok, true);
+  assert.equal((await c.command('VOICE_JOIN', { roomCode: c.state.roomCode, mic: true, listening: true })).ok, true);
+  const aMember = app.manager.voice.members.get(a.session.playerId);
+  const bMember = app.manager.voice.members.get(b.session.playerId);
+  const signal = { roomCode: code, sessionId: aMember.sessionId, targetId: bMember.id,
+    targetSessionId: bMember.sessionId, description: { type: 'offer', sdp: 'v=0\r\n' } };
+  const after = b.messages.length;
+  assert.equal((await a.command('VOICE_SIGNAL', signal)).ok, true);
+  const delivered = await b.wait('VOICE_SIGNAL', () => true, after);
+  assert.equal(delivered.fromId, aMember.id);
+  assert.deepEqual(delivered.description, signal.description);
+  assert.equal(c.messages.some(item => item.type === 'VOICE_SIGNAL'), false);
+  const cMember = app.manager.voice.members.get(c.session.playerId);
+  assert.equal((await a.command('VOICE_SIGNAL', { ...signal, targetId: cMember.id, targetSessionId: cMember.sessionId })).code, 'VOICE_TARGET_UNAVAILABLE');
+  assert.equal((await c.command('VOICE_SIGNAL', { ...signal, sessionId: cMember.sessionId })).code, 'VOICE_STALE_ROOM');
+  assert.equal(room.revision, before.revision);
+  assert.deepEqual(room.turnClock, before.clock);
+  assert.deepEqual(a.state.you.hand, before.hand);
+});
+
+test('voice validates payloads, rejects stale peer sessions and removes disconnected or leaving members', async t => {
+  const { clients: [a, b], app } = await setup(t, 2);
+  await a.command('ROOM_CREATE', { maxPlayers: 2 });
+  const code = a.state.roomCode;
+  await b.command('ROOM_JOIN', { code });
+  assert.equal((await a.command('VOICE_JOIN', { roomCode: code, mic: false, listening: false })).code, 'INVALID_VOICE_STATE');
+  assert.equal((await a.command('VOICE_JOIN', { roomCode: code, mic: 'yes', listening: true })).code, 'INVALID_VOICE_STATE');
+  await a.command('VOICE_JOIN', { roomCode: code, mic: true, listening: false });
+  await b.command('VOICE_JOIN', { roomCode: code, mic: false, listening: true });
+  const first = app.manager.voice.members.get(b.session.playerId).sessionId;
+  const signal = { roomCode: code, sessionId: app.manager.voice.members.get(a.session.playerId).sessionId,
+    targetId: b.session.playerId, targetSessionId: first };
+  assert.equal((await a.command('VOICE_SIGNAL', { ...signal, description: { type: 'bogus', sdp: 'x' } })).code, 'INVALID_VOICE_SIGNAL');
+  assert.equal((await a.command('VOICE_SIGNAL', { ...signal, candidate: { candidate: 'x', sdpMid: {}, sdpMLineIndex: 0 } })).code, 'INVALID_VOICE_SIGNAL');
+  assert.equal((await a.command('VOICE_SIGNAL', { ...signal, sessionId: 'spoofed', description: { type: 'offer', sdp: 'v=0' } })).code, 'VOICE_SESSION_REQUIRED');
+  await b.command('VOICE_LEAVE', { roomCode: code });
+  assert.equal(app.manager.voice.members.has(b.session.playerId), false);
+  await b.command('VOICE_JOIN', { roomCode: code, mic: false, listening: true });
+  assert.notEqual(app.manager.voice.members.get(b.session.playerId).sessionId, first);
+  assert.equal((await a.command('VOICE_SIGNAL', { ...signal, description: { type: 'offer', sdp: 'v=0' } })).code, 'VOICE_TARGET_UNAVAILABLE');
+  const after = a.messages.length;
+  b.socket.close();
+  await a.wait('VOICE_ROSTER', roster => roster.members.length === 1, after);
+  assert.equal(app.manager.voice.members.has(b.session.playerId), false);
+  await a.command('ROOM_LEAVE');
+  assert.equal(app.manager.voice.members.size, 0);
+});
+
+test('a managing host can listen without a microphone; session takeover and room closure clear voice', async t => {
+  const { clients: [a, b], app, port } = await setup(t, 2);
+  await a.command('ROOM_CREATE', { maxPlayers: 2, hostParticipates: false });
+  const code = a.state.roomCode;
+  await b.command('ROOM_JOIN', { code });
+  await a.command('VOICE_JOIN', { roomCode: code, mic: false, listening: true });
+  await b.command('VOICE_JOIN', { roomCode: code, mic: true, listening: true });
+  const replacement = await new TestClient(`ws://127.0.0.1:${port}/ws`).open();
+  await replacement.command('HELLO', { nickname: '恢复', resumeToken: a.session.resumeToken });
+  assert.equal(app.manager.voice.members.has(a.session.playerId), false);
+  assert.equal((await replacement.command('VOICE_JOIN', { roomCode: code, mic: false, listening: true })).ok, true);
+  await replacement.command('ROOM_CLOSE');
+  assert.equal(app.manager.voice.members.size, 0);
+  assert.equal((await b.command('VOICE_JOIN', { roomCode: code, mic: true, listening: true })).code, 'ROOM_NOT_FOUND');
+});
+
+test('voice supports a managing host and ten players in the same room', async t => {
+  const { clients, app } = await setup(t, 11);
+  const [host, ...players] = clients;
+  await host.command('ROOM_CREATE', { maxPlayers: 10, hostParticipates: false });
+  const code = host.state.roomCode;
+  for (const player of players) await player.command('ROOM_JOIN', { code });
+  for (const client of clients) assert.equal((await client.command('VOICE_JOIN', { roomCode: code, mic: false, listening: true })).ok, true);
+  assert.equal(app.manager.voice.members.size, 11);
+  for (const client of clients) {
+    const roster = await client.wait('VOICE_ROSTER', item => item.members.length === 11);
+    assert.equal(roster.self.id, client.session.playerId);
+    assert.equal(roster.members.filter(member => member.mic).length, 0);
+  }
+  await host.command('ROOM_CLOSE');
+  assert.equal(app.manager.voice.members.size, 0);
+});
+
+test('voice negotiation burst does not consume gameplay rate tokens; malformed JSON is still limited', async t => {
+  const app = await createServer({ rateBurst: 3 });
+  await new Promise(resolve => app.server.listen(0, '127.0.0.1', resolve));
+  t.after(() => app.close());
+  const url = `ws://127.0.0.1:${app.server.address().port}/ws`;
+  const client = await new TestClient(url).open();
+  await client.command('HELLO', { nickname: '限速测试' });
+  await client.command('ROOM_CREATE', { maxPlayers: 2 });
+  const code = client.state.roomCode;
+  for (let i = 0; i < 35; i++) assert.equal((await client.command('VOICE_JOIN', { roomCode: code, mic: false, listening: true })).ok, true);
+  assert.equal((await client.command('GET_STATE')).ok, true);
+  const invalid = await new TestClient(url).open();
+  const closed = once(invalid.socket, 'close');
+  for (let i = 0; i < 10; i++) invalid.socket.send('{');
+  assert.equal((await closed)[0], 1008);
+});
+
+test('room chat broadcasts once, isolates rooms and leaves game state and clock unchanged', async t => {
+  const { clients: [a, b, outside], app } = await setup(t, 3);
+  await a.command('ROOM_CREATE', { maxPlayers: 3 });
+  await b.command('ROOM_JOIN', { code: a.state.roomCode });
+  await outside.command('ROOM_CREATE', { maxPlayers: 2 });
+  await a.command('GAME_START');
+  const room = app.manager.rooms.get(a.state.roomCode);
+  const before = structuredClone(room.game); const revision = room.revision; const clock = structuredClone(room.turnClock);
+  const payload = { roomCode: room.code, chatId: room.chat.id, kind: 'text', text: '<script>hello</script> 😎', nickname: '伪造名字' };
+  assert.equal((await a.command('CHAT_SEND', payload, 'chat-once')).ok, true);
+  const delivered = await b.wait('CHAT_MESSAGE');
+  assert.equal(delivered.message.nickname, a.session.nickname);
+  assert.equal(delivered.message.text, payload.text);
+  assert.equal((await a.command('CHAT_SEND', payload, 'chat-once')).ok, true);
+  assert.equal(room.chat.messages.length, 1);
+  assert.equal(b.messages.filter(item => item.type === 'CHAT_MESSAGE').length, 1);
+  assert.equal(outside.messages.some(item => item.type === 'CHAT_MESSAGE'), false);
+  assert.equal((await outside.command('CHAT_SEND', payload)).code, 'CHAT_STALE_ROOM');
+  assert.equal((await b.command('CHAT_SYNC', { roomCode: room.code, chatId: room.chat.id })).ok, true);
+  const history = await b.wait('CHAT_HISTORY');
+  assert.equal(history.messages.length, 1);
+  assert.deepEqual(room.game, before);
+  assert.equal(room.revision, revision);
+  assert.deepEqual(room.turnClock, clock);
+});
+
+test('chat restores history to resumed and new members, rejects stale rooms and clears on closure', async t => {
+  const { clients: [a, b], app, port } = await setup(t, 2);
+  await a.command('ROOM_CREATE', { maxPlayers: 3 });
+  const code = a.state.roomCode; const chatId = a.state.chatId;
+  await a.command('CHAT_SEND', { roomCode: code, chatId, kind: 'sticker', stickerId: 'draw-four' });
+  await b.command('ROOM_JOIN', { code });
+  await b.command('CHAT_SYNC', { roomCode: code, chatId });
+  assert.equal((await b.wait('CHAT_HISTORY')).messages[0].stickerId, 'draw-four');
+  const replacement = await new TestClient(`ws://127.0.0.1:${port}/ws`).open();
+  await replacement.command('HELLO', { nickname: '恢复', resumeToken: b.session.resumeToken });
+  await replacement.command('CHAT_SYNC', { roomCode: code, chatId });
+  assert.equal((await replacement.wait('CHAT_HISTORY')).messages.length, 1);
+  await replacement.command('ROOM_LEAVE');
+  assert.equal((await replacement.command('CHAT_SEND', { roomCode: code, chatId, kind: 'text', text: 'late' })).code, 'ROOM_NOT_FOUND');
+  await replacement.command('ROOM_CREATE', { maxPlayers: 2 });
+  assert.equal((await replacement.command('CHAT_SYNC', { roomCode: replacement.state.roomCode, chatId })).code, 'CHAT_STALE_ROOM');
+  await a.command('ROOM_CLOSE');
+  assert.equal(app.manager.rooms.has(code), false);
+});
+
+test('uploaded GIF chat is delivered and request cache does not retain image payloads', async t => {
+  const { clients: [a, b], app } = await setup(t, 2);
+  await a.command('ROOM_CREATE', { maxPlayers: 2 });
+  await b.command('ROOM_JOIN', { code: a.state.roomCode });
+  const code = a.state.roomCode; const chatId = a.state.chatId;
+  const image = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+  assert.equal((await a.command('CHAT_SEND', { roomCode: code, chatId, kind: 'image', image }, 'image-once')).ok, true);
+  assert.equal((await b.wait('CHAT_MESSAGE')).message.image, image);
+  const cached = app.manager.players.get(a.session.playerId).requests.get('image-once');
+  assert.equal(cached.signature.length, 64);
+  assert.deepEqual(cached.privateMessages, []);
+  await b.command('CHAT_SYNC', { roomCode: code, chatId }, 'image-history');
+  assert.deepEqual(app.manager.players.get(b.session.playerId).requests.get('image-history').privateMessages, []);
+  assert.equal((await a.command('CHAT_SEND', { roomCode: code, chatId, kind: 'image', image: 'data:image/svg+xml;base64,PHN2Zy8+' })).code, 'CHAT_INVALID_IMAGE');
 });

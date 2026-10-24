@@ -1,4 +1,6 @@
-import { randomBytes, randomInt, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomInt, randomUUID } from 'node:crypto';
+import { VoiceHub } from './voice.js';
+import { RoomChat } from './chat.js';
 import { createGame, applyCommand, applyTurnTimeout, activePlayers, gameView, RuleError, requireRule } from './game.js';
 
 const GAME_COMMANDS = new Set(['CHOOSE_INITIAL_COLOR', 'PLAY_CARD', 'DRAW_CARD',
@@ -20,6 +22,7 @@ export class RoomManager {
     this.sessionTtl = sessionTtl;
     this.actionDelayMs = actionDelayMs;
     this.now = now;
+    this.voice = new VoiceHub({ send, roomFor: player => this.roomFor(player), getPlayer: id => this.players.get(id) });
   }
 
   roomFor(player) {
@@ -46,7 +49,7 @@ export class RoomManager {
     const rankOf = id => room.game?.ranking.find(entry => entry.playerId === id)?.rank ??
       ((room.game?.finishOrder.indexOf(id) ?? -1) + 1 || null);
     return {
-      roomCode: room.code, revision: room.revision, hostId: room.hostId,
+      roomCode: room.code, revision: room.revision, hostId: room.hostId, chatId: room.chat.id,
       maxPlayers: room.maxPlayers, status: room.status, info: room.info,
       participantCount: this.participants(room).length,
       turnSeconds: room.turnSeconds, serverTime: this.now(),
@@ -88,6 +91,7 @@ export class RoomManager {
       this.players.set(player.id, player);
     }
     const previousSocket = player.socket;
+    this.voice.leave(player.id);
     player.socket = socket;
     player.online = true;
     player.disconnectedAt = null;
@@ -168,7 +172,7 @@ export class RoomManager {
     requireRule(code !== undefined, 'ROOM_CODE_EXHAUSTED', '房间编号已用完');
     const room = { code, maxPlayers, turnSeconds, turnClock: null, hostId: player.id, playerIds: [player.id],
       spectatorIds: hostParticipates ? [] : [player.id],
-      status: 'waiting', revision: 1, game: null, info: '邀请朋友输入房间号加入，至少 2 人即可开始。' };
+      status: 'waiting', revision: 1, game: null, chat: new RoomChat(), info: '邀请朋友输入房间号加入，至少 2 人即可开始。' };
     this.rooms.set(code, room);
     player.roomCode = code;
     return room;
@@ -190,6 +194,7 @@ export class RoomManager {
 
   leave(player, reason = 'left') {
     const room = this.roomFor(player);
+    this.voice.leave(player.id);
     const wasPlaying = room.game?.seatOrder.includes(player.id) && !room.game.finishOrder.includes(player.id);
     room.playerIds = room.playerIds.filter(id => id !== player.id);
     room.spectatorIds = room.spectatorIds.filter(id => id !== player.id);
@@ -251,6 +256,7 @@ export class RoomManager {
       case 'ROOM_CLOSE': {
         const closing = this.hostRoom(player);
         for (const id of closing.playerIds) {
+          this.voice.leave(id);
           const member = this.players.get(id);
           member.roomCode = null;
           send(member.socket, 'ROOM_CLOSED', { reason: 'host_closed' });
@@ -312,13 +318,46 @@ export class RoomManager {
       }
       player = this.players.get(socket.playerId);
       requireRule(player?.socket === socket, 'SESSION_REQUIRED', '请先连接，或此窗口已被其他窗口接管');
-      signature = JSON.stringify([message.type, message.payload]);
+      if (message.type.startsWith('VOICE_')) {
+        this.voice.handle(player, message.type, message.payload);
+        send(socket, 'COMMAND_RESULT', { requestId: message.requestId, ok: true });
+        return;
+      }
+      // Keep duplicate detection bounded even when the request carries an image.
+      signature = createHash('sha256').update(JSON.stringify([message.type, message.payload])).digest('hex');
       const cached = player.requests.get(message.requestId);
       if (cached) {
         requireRule(cached.signature === signature, 'REQUEST_ID_REUSED', '请求编号不能重复用于不同操作');
+        if (message.type === 'CHAT_SYNC' && cached.result.ok) {
+          const room = this.roomFor(player);
+          requireRule(message.payload.roomCode === room.code && message.payload.chatId === room.chat.id,
+            'CHAT_STALE_ROOM', '聊天房间已变化，请重新加入');
+          send(socket, 'COMMAND_RESULT', cached.result);
+          send(socket, 'CHAT_HISTORY', room.chat.history(room.code));
+          return;
+        }
         send(socket, 'COMMAND_RESULT', cached.result);
+        if (message.type === 'CHAT_SEND' || message.type === 'CHAT_SYNC') return;
         for (const item of cached.privateMessages) send(socket, item.type, item.payload);
         send(socket, 'STATE', player.roomCode ? this.view(this.roomFor(player), player) : null);
+        return;
+      }
+      if (message.type === 'CHAT_SEND' || message.type === 'CHAT_SYNC') {
+        const room = this.roomFor(player);
+        requireRule(message.payload.roomCode === room.code && message.payload.chatId === room.chat.id,
+          'CHAT_STALE_ROOM', '聊天房间已变化，请重新加入');
+        const privateMessages = [];
+        if (message.type === 'CHAT_SYNC') privateMessages.push({ type: 'CHAT_HISTORY', payload: room.chat.history(room.code) });
+        else {
+          const item = room.chat.post(player, message.payload, this.now());
+          for (const id of room.playerIds) send(this.players.get(id)?.socket, 'CHAT_MESSAGE', {
+            roomCode: room.code, chatId: room.chat.id, message: item
+          });
+        }
+        const result = { requestId: message.requestId, ok: true };
+        this.remember(player, message.requestId, signature, result, []);
+        send(socket, 'COMMAND_RESULT', result);
+        for (const item of privateMessages) send(socket, item.type, item.payload);
         return;
       }
       const { room, privateMessages } = this.execute(player, message);
@@ -347,6 +386,7 @@ export class RoomManager {
   disconnect(socket, now = this.now()) {
     const player = this.players.get(socket.playerId);
     if (!player || player.socket !== socket) return;
+    this.voice.leave(player.id);
     player.socket = null; player.online = false; player.disconnectedAt = now;
     if (!player.roomCode) return;
     const room = this.roomFor(player);
