@@ -21,6 +21,7 @@ export async function createServer(options = {}) {
     ['/styles.css', 'styles.css', 'text/css; charset=utf-8'],
     ['/game.css', 'game.css', 'text/css; charset=utf-8'],
     ['/table-layout.js', 'table-layout.js', 'text/javascript; charset=utf-8'],
+    ['/hand-layout.js', 'hand-layout.js', 'text/javascript; charset=utf-8'],
     ['/effects.js', 'effects.js', 'text/javascript; charset=utf-8'],
     ['/sounds.js', 'sounds.js', 'text/javascript; charset=utf-8'],
     ['/audio/uno.wav', 'audio/uno.wav', 'audio/wav'],

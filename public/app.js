@@ -1,6 +1,7 @@
 import { layoutSeats } from './table-layout.js';
 import { createEffects } from './effects.js';
 import { createSounds } from './sounds.js';
+import { layoutHand } from './hand-layout.js';
 
 const $ = id => document.getElementById(id);
 const colorNames = { red: '红色', yellow: '黄色', green: '绿色', blue: '蓝色' };
@@ -425,7 +426,7 @@ function renderSeats(game, viewerId) {
 }
 
 function renderHand(cards, playableIds, enabled) {
-  const container = $('hand');
+  const container = $('handFan');
   const existing = new Map([...container.children].map(node => [node.dataset.cardId, node]));
   const ids = new Set(cards.map(card => card.id));
   for (const node of [...container.children]) if (!ids.has(node.dataset.cardId)) node.remove();
@@ -440,6 +441,31 @@ function renderHand(cards, playableIds, enabled) {
     node.classList.toggle('playable', playable);
     node.classList.remove('leaving');
     if (container.children[index] !== node) container.insertBefore(node, container.children[index] ?? null);
+  });
+  $('hand').hidden = cards.length === 0;
+  if (!cards.length) $('handScrollHint').hidden = true;
+  arrangeHand();
+}
+
+function arrangeHand() {
+  const viewport = $('hand');
+  const fan = $('handFan');
+  if (!viewport.clientWidth) return;
+  const styles = getComputedStyle(viewport);
+  const layout = layoutHand(fan.children.length, viewport.clientWidth,
+    parseFloat(styles.getPropertyValue('--hand-card-width')),
+    parseFloat(styles.getPropertyValue('--hand-card-height')));
+  fan.style.width = `${layout.width}px`;
+  fan.style.height = `${layout.height}px`;
+  viewport.dataset.overflow = String(layout.overflowing ?? false);
+  $('handScrollHint').hidden = !layout.overflowing;
+  viewport.setAttribute('aria-label', layout.overflowing ? '扇形手牌，左右滑动查看全部牌' : '扇形手牌');
+  layout.cards.forEach((position, index) => {
+    const node = fan.children[index];
+    node.style.left = `${position.x}px`;
+    node.style.top = `${position.y}px`;
+    node.style.setProperty('--fan-angle', `${position.angle}deg`);
+    node.style.zIndex = index + 1;
   });
 }
 
@@ -524,5 +550,7 @@ $('closeEvidence').onclick = () => $('evidenceDialog').close();
 $('showRules').onclick = () => $('rulesDialog').showModal();
 $('closeRules').onclick = () => $('rulesDialog').close();
 $('reconnect').onclick = () => { attempt = 0; connect().catch(error => toast(error.message, true)); };
+if (typeof ResizeObserver !== 'undefined') new ResizeObserver(arrangeHand).observe($('hand'));
+else window.addEventListener('resize', arrangeHand);
 render();
 if (readStorage('uno.token') && $('nickname').value) connect().catch(() => {});

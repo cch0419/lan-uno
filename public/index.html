@@ -94,7 +94,8 @@
           </div>
           <section id="handPanel" class="hand-panel panel">
             <div class="hand-toolbar"><div><h2>你的手牌 <span id="handCount" class="count-badge"></span></h2><p id="handHint" class="field-hint"></p></div><div class="hand-actions"><button id="drawCard" class="button draw-button"><strong>＋ 摸一张</strong><small>摸完结束回合</small></button></div></div>
-            <div id="hand" class="hand" aria-label="你的手牌，左右滑动查看"></div>
+            <div id="hand" class="hand" role="group" aria-label="扇形手牌"><div id="handFan" class="hand-fan"></div></div>
+            <p id="handScrollHint" class="hand-scroll-hint" hidden>← 左右滑动，查看全部手牌 →</p>
           </section>
           <section id="spectatorPanel" class="hand-panel panel" hidden><h2>你正在旁观牌桌</h2><p class="field-hint">你不参与本局，不会收到手牌。房主仍可管理房间，并在结算后返回大厅。电脑上的 Node 服务需要保持运行。</p></section>
           <details class="mobile-history"><summary>查看牌桌动态</summary><ol id="mobileActivityLog"></ol></details>

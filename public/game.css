@@ -149,7 +149,7 @@ body.in-game .room-header .eyebrow { display: none; }
   body.in-game .room-controls .text-button { font-size: 10px; }
   .game-caption { font-size: 9px; margin: 6px 5px 1px; }
   .house-rules { font-size: 8px; padding: 3px 7px; }
-  .round-table { height: clamp(350px, calc(100svh - 310px), 480px); }
+  .round-table { height: clamp(320px, calc(100svh - 370px), 440px); }
   .round-table .felt-table { inset: 40px 33px 39px; }
   .round-table .felt-table::before { inset: 10px; }
   .table-center { width: 224px; top: 49%; }
@@ -218,4 +218,59 @@ body.in-game .room-header .eyebrow { display: none; }
 @media (prefers-reduced-motion: reduce) {
   .table-seat.current, .deck-button:not(:disabled), .playing-card.drawn-in, .card-settle, .direction-changed { animation: none !important; }
   .announcement { animation: effect-exit .15s 1s forwards; }
+}
+
+/* A shallow fan with a minimum exposed edge; long hands scroll, never shrink. */
+.hand-panel .hand {
+  --hand-card-width: 83px;
+  --hand-card-height: 119px;
+  display: block;
+  min-height: 0;
+  padding: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-gutter: stable;
+  scroll-padding-inline: 38px;
+  touch-action: pan-x pan-y;
+}
+.hand-panel .hand[hidden] { display: none; }
+.hand-fan { position: relative; isolation: isolate; }
+.hand-panel .hand-fan > .playing-card {
+  position: absolute;
+  width: var(--hand-card-width);
+  height: var(--hand-card-height);
+  rotate: var(--fan-angle, 0deg);
+  transform-origin: 50% 100%;
+  transform: none;
+  box-shadow: -3px 3px 8px #172f2926;
+  transition: transform .18s ease, box-shadow .18s ease, rotate .18s ease;
+  touch-action: pan-x pan-y;
+}
+.hand-panel .hand-fan > .playing-card:focus-visible {
+  z-index: 150 !important;
+  rotate: 0deg;
+  transform: translateY(-18px);
+  outline: 3px solid #175c4a;
+  outline-offset: 3px;
+  box-shadow: 0 10px 20px #172f2930;
+}
+@media (hover: hover) and (pointer: fine) {
+  .hand-panel .hand-fan > .playing-card:hover {
+    z-index: 150 !important;
+    rotate: 0deg;
+    transform: translateY(-18px);
+    box-shadow: 0 10px 20px #172f2930;
+  }
+}
+.hand-panel .hand-fan > .playing-card:not(:disabled):active {
+  z-index: 150 !important;
+  transform: translateY(-13px) scale(.98);
+}
+.hand-scroll-hint { margin: 0 0 3px; text-align: center; color: var(--muted); font-size: 10px; letter-spacing: 1px; }
+@media (max-height: 800px) {
+  .hand-panel { position: relative; }
+}
+@media (max-width: 720px) {
+  .hand-panel .hand { --hand-card-width: 73px; --hand-card-height: 105px; }
+  .hand-scroll-hint { font-size: 9px; }
 }
